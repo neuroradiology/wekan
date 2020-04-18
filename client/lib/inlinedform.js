@@ -28,7 +28,9 @@ InlinedForm = BlazeComponent.extendComponent({
     currentlyOpenedForm.set(null);
   },
 
-  open() {
+  open(evt) {
+    evt && evt.preventDefault();
+
     // Close currently opened form, if any
     EscapeActions.executeUpTo('inlinedForm');
     this.isOpen.set(true);
@@ -46,33 +48,51 @@ InlinedForm = BlazeComponent.extendComponent({
   },
 
   events() {
-    return [{
-      'click .js-close-inlined-form': this.close,
-      'click .js-open-inlined-form': this.open,
+    return [
+      {
+        'click .js-close-inlined-form': this.close,
+        'click .js-open-inlined-form': this.open,
 
-      // Pressing Ctrl+Enter should submit the form
-      'keydown form textarea'(evt) {
-        if (evt.keyCode === 13 && (evt.metaKey || evt.ctrlKey)) {
-          this.find('button[type=submit]').click();
-        }
-      },
+        // Pressing Ctrl+Enter should submit the form
+        'keydown form textarea'(evt) {
+          if (evt.keyCode === 13 && (evt.metaKey || evt.ctrlKey)) {
+            this.find('button[type=submit]').click();
+          }
+        },
 
-      // Close the inlined form when after its submission
-      submit() {
-        if (this.currentData().autoclose !== false) {
-          Tracker.afterFlush(() => {
-            this.close();
-          });
-        }
+        // Close the inlined form when after its submission
+        submit() {
+          if (this.currentData().autoclose !== false) {
+            Tracker.afterFlush(() => {
+              this.close();
+            });
+          }
+        },
       },
-    }];
+    ];
   },
 }).register('inlinedForm');
 
 // Press escape to close the currently opened inlinedForm
-EscapeActions.register('inlinedForm',
-  () => { currentlyOpenedForm.get().close(); },
-  () => { return currentlyOpenedForm.get() !== null; }, {
-    noClickEscapeOn: '.js-inlined-form',
-  }
+EscapeActions.register(
+  'inlinedForm',
+  () => {
+    currentlyOpenedForm.get().close();
+  },
+  () => {
+    return currentlyOpenedForm.get() !== null;
+  },
+  {
+    enabledOnClick: false,
+  },
 );
+
+// submit on click outside
+//document.addEventListener('click', function(evt) {
+//  const openedForm = currentlyOpenedForm.get();
+//  const isClickOutside = $(evt.target).closest('.js-inlined-form').length === 0;
+//  if (openedForm && isClickOutside) {
+//    $('.js-inlined-form button[type=submit]').click();
+//    openedForm.close();
+//  }
+//}, true);

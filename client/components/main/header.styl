@@ -4,6 +4,7 @@
   color: white
   transition: background-color 0.4s
   background: #2980B9
+  z-index: 17
 
   #header-main-bar
     height: 40px
@@ -18,6 +19,9 @@
       float: left
       border-radius: 3px
 
+      .board-header-watch-icon
+        padding-left: 7px
+
       a.fa, a i.fa
         color: white
 
@@ -25,13 +29,12 @@
         font-size: 0.9em
         margin-right: 10px
 
-
     .wekan-logo
-      display: block
-      margin: 3px auto 0
+      margin: 3px auto auto
       width: 97px
       opacity: 0.6
       transition: opacity 0.15s
+      float: right
 
       &:hover
         opacity: 0.9
@@ -96,6 +99,7 @@
   height: 28px
   font-size: 12px
   display: flex
+  z-index: 21
 
   #header-user-bar,
   #header-new-board-icon,
@@ -123,7 +127,7 @@
       &.current
         color: darken(white, 5%)
 
-      &:first-child .fa-home
+      &:first-child .fa-home,&:nth-child(3) .fa-globe
         margin-right: 5px
 
       a.js-create-board
@@ -184,12 +188,48 @@
     width: 100%
     padding: 10px 0px
     z-index: 30
-    position: absolute
-    bottom: 0px
 
     ul
-      width: calc(100% - 150px)
+      width: calc(100% - 60px)
       overflow: ellipsis
+      padding: 10px
+      margin: -10px
 
       li
-        height: 28px
+        height: 100%
+        padding: 12px 0px
+        margin: -10px 0px
+
+        a
+          height: 100%
+          padding: 12px 10px
+          margin: -10px 0px
+
+        .fa-home
+          font-size: 26px
+          margin-top: -2px
+
+    #header-new-board-icon
+      display: none
+
+    #header-user-bar
+      position: absolute
+      right: 0px
+      padding: 10px
+      margin: -10px 0 -10px -10px
+
+.announcement .viewer
+  display: inline-block
+
+.announcement,
+.offline-warning
+  width: 100%
+  text-align: center
+  padding: 0
+  margin: 0
+  background: #F8ECBD
+  clear: both
+
+  p
+    margin: 7px
+    padding: 0

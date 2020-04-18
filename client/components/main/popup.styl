@@ -33,6 +33,9 @@ $popupWidth = 300px
   textarea
     height: 72px
 
+  form a span
+    padding: 0 0.5rem
+
   .header
     height: 36px
     position: relative
@@ -127,7 +130,8 @@ $popupWidth = 300px
     .popup-container-depth-{depth}
       transform: translateX(- depth * $popupWidth)
 
-.select-members-list
+.select-members-list,
+.select-avatars-list
   margin-bottom: 8px
 
 .pop-over-list
@@ -227,7 +231,8 @@ $popupWidth = 300px
     min-height: 56px
     position: relative
 
-    .member
+    .member,
+    .avatar
       position: absolute
       top: 2px
       left: 2px

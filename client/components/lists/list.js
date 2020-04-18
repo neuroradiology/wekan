@@ -1,10 +1,8 @@
-const { calculateIndex } = Utils;
+import { Cookies } from 'meteor/ostrio:cookies';
+const cookies = new Cookies();
+const { calculateIndex, enableClickOnTouch } = Utils;
 
 BlazeComponent.extendComponent({
-  template() {
-    return 'list';
-  },
-
   // Proxy
   openForm(options) {
     this.childComponents('listBody')[0].openForm(options);
@@ -22,33 +20,49 @@ BlazeComponent.extendComponent({
   // callback, we basically solve all issues related to reactive updates. A
   // comment below provides further details.
   onRendered() {
-    const boardComponent = this.parentComponent();
+    const boardComponent = this.parentComponent().parentComponent();
+
+    function userIsMember() {
+      return (
+        Meteor.user() &&
+        Meteor.user().isBoardMember() &&
+        !Meteor.user().isCommentOnly()
+      );
+    }
+
     const itemsSelector = '.js-minicard:not(.placeholder, .js-card-composer)';
     const $cards = this.$('.js-minicards');
+
     $cards.sortable({
-      connectWith: '.js-minicards',
+      connectWith: '.js-minicards:not(.js-list-full)',
       tolerance: 'pointer',
-      appendTo: 'body',
+      appendTo: '.board-canvas',
       helper(evt, item) {
         const helper = item.clone();
         if (MultiSelection.isActive()) {
           const andNOthers = $cards.find('.js-minicard.is-checked').length - 1;
           if (andNOthers > 0) {
-            helper.append($(Blaze.toHTML(HTML.DIV(
-              { 'class': 'and-n-other' },
-              TAPi18n.__('and-n-other-card', { count: andNOthers })
-            ))));
+            helper.append(
+              $(
+                Blaze.toHTML(
+                  HTML.DIV(
+                    { class: 'and-n-other' },
+                    TAPi18n.__('and-n-other-card', { count: andNOthers }),
+                  ),
+                ),
+              ),
+            );
           }
         }
         return helper;
       },
       distance: 7,
       items: itemsSelector,
-      scroll: false,
       placeholder: 'minicard-wrapper placeholder',
       start(evt, ui) {
+        ui.helper.css('z-index', 1000);
         ui.placeholder.height(ui.helper.height());
-        EscapeActions.executeUpTo('popup');
+        EscapeActions.executeUpTo('popup-close');
         boardComponent.setIsDragging(true);
       },
       stop(evt, ui) {
@@ -59,6 +73,19 @@ BlazeComponent.extendComponent({
         const nCards = MultiSelection.isActive() ? MultiSelection.count() : 1;
         const sortIndex = calculateIndex(prevCardDom, nextCardDom, nCards);
         const listId = Blaze.getData(ui.item.parents('.list').get(0))._id;
+        const currentBoard = Boards.findOne(Session.get('currentBoard'));
+        let swimlaneId = '';
+        if (
+          Utils.boardView() === 'board-view-swimlanes' ||
+          currentBoard.isTemplatesBoard()
+        )
+          swimlaneId = Blaze.getData(ui.item.parents('.swimlane').get(0))._id;
+        else if (
+          Utils.boardView() === 'board-view-lists' ||
+          Utils.boardView() === 'board-view-cal' ||
+          !Utils.boardView
+        )
+          swimlaneId = currentBoard.getDefaultSwimline()._id;
 
         // Normally the jquery-ui sortable library moves the dragged DOM element
         // to its new position, which disrupts Blaze reactive updates mechanism
@@ -71,24 +98,68 @@ BlazeComponent.extendComponent({
 
         if (MultiSelection.isActive()) {
           Cards.find(MultiSelection.getMongoSelector()).forEach((card, i) => {
-            card.move(listId, sortIndex.base + i * sortIndex.increment);
+            card.move(
+              currentBoard._id,
+              swimlaneId,
+              listId,
+              sortIndex.base + i * sortIndex.increment,
+            );
           });
         } else {
           const cardDomElement = ui.item.get(0);
           const card = Blaze.getData(cardDomElement);
-          card.move(listId, sortIndex.base);
+          card.move(currentBoard._id, swimlaneId, listId, sortIndex.base);
         }
         boardComponent.setIsDragging(false);
       },
     });
 
-    function userIsMember() {
-      return Meteor.user() && Meteor.user().isBoardMember();
-    }
+    // ugly touch event hotfix
+    enableClickOnTouch(itemsSelector);
 
-    // Disable drag-dropping if the current user is not a board member
     this.autorun(() => {
-      $cards.sortable('option', 'disabled', !userIsMember());
+      let showDesktopDragHandles = false;
+      currentUser = Meteor.user();
+      if (currentUser) {
+        showDesktopDragHandles = (currentUser.profile || {})
+          .showDesktopDragHandles;
+      } else if (cookies.has('showDesktopDragHandles')) {
+        showDesktopDragHandles = true;
+      } else {
+        showDesktopDragHandles = false;
+      }
+
+      if (!Utils.isMiniScreen() && showDesktopDragHandles) {
+        $cards.sortable({
+          handle: '.handle',
+        });
+      } else if (!Utils.isMiniScreen() && !showDesktopDragHandles) {
+        $cards.sortable({
+          handle: '.minicard',
+        });
+      }
+
+      if ($cards.data('sortable')) {
+        $cards.sortable(
+          'option',
+          'disabled',
+          // Disable drag-dropping when user is not member/is miniscreen
+          !userIsMember(),
+          // Not disable drag-dropping while in multi-selection mode
+          // MultiSelection.isActive() || !userIsMember(),
+        );
+      }
+
+      if ($cards.data('sortable')) {
+        $cards.sortable(
+          'option',
+          'disabled',
+          // Disable drag-dropping when user is not member/is miniscreen
+          Utils.isMiniScreen(),
+          // Not disable drag-dropping while in multi-selection mode
+          // MultiSelection.isActive() || !userIsMember(),
+        );
+      }
     });
 
     // We want to re-run this function any time a card is added.
@@ -118,3 +189,23 @@ BlazeComponent.extendComponent({
     });
   },
 }).register('list');
+
+Template.list.helpers({
+  showDesktopDragHandles() {
+    currentUser = Meteor.user();
+    if (currentUser) {
+      return (currentUser.profile || {}).showDesktopDragHandles;
+    } else if (cookies.has('showDesktopDragHandles')) {
+      return true;
+    } else {
+      return false;
+    }
+  },
+});
+
+Template.miniList.events({
+  'click .js-select-list'() {
+    const listId = this._id;
+    Session.set('currentList', listId);
+  },
+});

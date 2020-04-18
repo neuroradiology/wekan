@@ -1,3 +1,5 @@
+@import 'nib'
+
 $spaceBetweenTiles = 16px
 
 .board-list
@@ -15,6 +17,7 @@ $spaceBetweenTiles = 16px
         opacity: 1
 
   .board-list-item
+    overflow: hidden;
     background-color: #999
     color: #f6f6f6
     height: 90px
@@ -41,9 +44,9 @@ $spaceBetweenTiles = 16px
     line-height: 22px
 
   .board-list-item-desc
-    color: rgba(255, 255, 255, .5)
+    color: #fff
     display: block
-    font-size: 10px
+    font-size: 14px
     font-weight: 400
     line-height: 18px
 
@@ -71,16 +74,61 @@ $spaceBetweenTiles = 16px
     transition-duration: .15s
     transition-property: color, font-size, background
 
+  .fa-circle
+    bottom: 0;
+    font-size: 10px;
+    height: 10px;
+    line-height: 10px;
+    padding: 9px 9px;
+    position: absolute;
+    right: 0;
+    transition-duration: .15s
+    transition-property: color, font-size, background
+
+  .has-overtime-card-active
+    color: #eb4646 !important
+
+  .no-overtime-card-active
+    color: #3cb500 !important
+
   .is-star-active
     color: white
+
+  .fa-clone
+    position: absolute;
+    bottom: 0
+    font-size: 14px
+    height: 18px
+    line-height: 18px
+    opacity: 0
+    right: 0
+    padding: 9px 9px
+    transition-duration: .15s
+    transition-property: color, font-size, background
+
+  .fa-archive
+    position: absolute;
+    bottom: 0
+    font-size: 14px
+    height: 18px
+    line-height: 18px
+    opacity: 0
+    left: 0
+    padding: 9px 9px
+    transition-duration: .15s
+    transition-property: color, font-size, background
 
   li:hover a
     &:hover
       .fa-star,
+      .fa-clone,
+      .fa-archive,
       .fa-star-o
         color: white
 
     .fa-star,
+    .fa-clone,
+    .fa-archive,
     .fa-star-o
       color: white
       opacity: .75
@@ -113,6 +161,7 @@ $spaceBetweenTiles = 16px
       padding-right: 6px
 
     .background-box
+      color: white
       border-radius: 3px
       background-size: cover
       display: block
@@ -134,10 +183,11 @@ $spaceBetweenTiles = 16px
     overflow: scroll
 
     li
-      width: 33.3%
+      width: 50% 
 
     .board-list-item
       overflow: hidden
+      height: 8rem
 
     .board-list-item-sub-name
       position: relative
@@ -146,4 +196,4 @@ $spaceBetweenTiles = 16px
 
 @media screen and (max-width: 360px)
     li
-      width: 50%
+      width: 100%
