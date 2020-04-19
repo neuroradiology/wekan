@@ -22,10 +22,10 @@ const pkgdef :Spk.PackageDefinition = (
     appTitle = (defaultText = "Wekan"),
     # The name of the app as it is displayed to the user.
 
-    appVersion = 10,
+    appVersion = 397,
     # Increment this for every release.
 
-    appMarketingVersion = (defaultText = "0.10.1"),
+    appMarketingVersion = (defaultText = "3.97.0~2020-04-19"),
     # Human-readable presentation of the app version.
 
     minUpgradableAppVersion = 0,
@@ -57,14 +57,14 @@ const pkgdef :Spk.PackageDefinition = (
         market = (svg = embed "meta/icons/wekan-150.svg"),
       ),
 
-      website = "https://wekan.io",
+      website = "https://wekan.github.io",
       codeUrl = "https://github.com/wekan/wekan",
       license = (openSource = mit),
       categories = [productivity, office],
 
       author = (
-        contactEmail = "mquandalle@wekan.io",
-        pgpSignature = embed "meta/mquandalle-pgp-sig",
+        contactEmail = "x@xet7.org",
+        pgpSignature = embed "meta/wekanteam-pgp-sig",
       ),
 
       pgpKeyring = embed "meta/keyring",
@@ -75,17 +75,22 @@ const pkgdef :Spk.PackageDefinition = (
 
       screenshots = [
         (
-          width = 512,
-          height = 330,
-          jpeg = embed "meta/screenshots/board-view.jpg"
+          width = 1920,
+          height = 1133,
+          png = embed "meta/screenshots/board_view_01.png"
         ),
-        # XXX The screenshots should have a standard width and height.
+        (
+          width = 1920,
+          height = 1133,
+          png = embed "meta/screenshots/board_view_02.png"
+        ),
       ],
 
       changeLog = (
         defaultText = embed "CHANGELOG.md",
         localizations = [
           (locale = "fr", text = embed "meta/t9n-changelog/fr.md"),
+          (locale = "fi", text = embed "meta/t9n-changelog/fi.md"),
         ],
       )
     )
@@ -113,12 +118,14 @@ const pkgdef :Spk.PackageDefinition = (
           defaultText = "participate",
           localizations = [
             (locale = "fr", text = "participer"),
+            (locale = "fi", text = "osallistu"),
           ],
         ),
         description = (
           defaultText = "allows participating in the board",
           localizations = [
             (locale = "fr", text = "permet de participer dans le tableau"),
+            (locale = "fi", text = "mahdollistaa taululle osallistumisen"),
           ],
         )
       ), (
@@ -127,12 +134,14 @@ const pkgdef :Spk.PackageDefinition = (
           defaultText = "configure",
           localizations = [
             (locale = "fr", text = "configurer"),
+            (locale = "fi", text = "asetukset"),
           ],
         ),
         description = (
           defaultText = "allows configuring the board",
           localizations = [
             (locale = "fr", text = "permet de configurer le tableau"),
+            (locale = "fi", text = "mahdollistaa taulun asetusten määrittämisen"),
           ],
         )
       )],
@@ -142,6 +151,7 @@ const pkgdef :Spk.PackageDefinition = (
           defaultText = "observer",
           localizations = [
             (locale = "fr", text = "observateur"),
+            (locale = "fi", text = "tarkkailija"),
           ],
         ),
         permissions = [false, false],
@@ -149,6 +159,7 @@ const pkgdef :Spk.PackageDefinition = (
           defaultText = "can read",
           localizations = [
             (locale = "fr", text = "peut lire"),
+            (locale = "fi", text = "voi lukea"),
           ],
         )
       ), (
@@ -156,6 +167,7 @@ const pkgdef :Spk.PackageDefinition = (
           defaultText = "member",
           localizations = [
             (locale = "fr", text = "membre"),
+            (locale = "fi", text = "jäsen"),
           ],
         ),
         permissions = [true, false],
@@ -163,6 +175,7 @@ const pkgdef :Spk.PackageDefinition = (
           defaultText = "can edit",
           localizations = [
             (locale = "fr", text = "peut éditer"),
+            (locale = "fi", text = "voi muokata"),
           ],
         ),
         default = true,
@@ -173,8 +186,48 @@ const pkgdef :Spk.PackageDefinition = (
       #
       # XXX Administrators configuration options aren’t implemented yet, so this
       # role is currently useless.
-      )]
-    )
+      )],
+
+      eventTypes = [(
+         name = "addBoardMember",
+         verbPhrase = (defaultText = "added to board"),
+      ), (
+        name = "createList",
+        verbPhrase = (defaultText = "created new list"),
+      ), (
+        name = "archivedList",
+        verbPhrase = (defaultText = "archived list"),
+      ), (
+        name = "restoredList",
+        verbPhrase = (defaultText = "restored list"),
+      ), (
+        name = "createCard",
+        verbPhrase = (defaultText = "created new card"),
+      ), (
+        name = "moveCard",
+        verbPhrase = (defaultText = "moved card"),
+      ), (
+        name = "archivedCard",
+        verbPhrase = (defaultText = "archived card"),
+      ), (
+        name = "restoredCard",
+        verbPhrase = (defaultText = "restored card"),
+      ), (
+        name = "addComment",
+        verbPhrase = (defaultText = "added comment"),
+      ), (
+        name = "addAttachement",
+        verbPhrase = (defaultText = "added attachment"),
+      ), (
+        name = "joinMember",
+        verbPhrase = (defaultText = "added to card"),
+      ), (
+        name = "unjoinMember",
+        verbPhrase = (defaultText = "removed from card"),
+      ), ],
+    ),
+    apiPath = "/",
+    saveIdentityCaps = true,
   ),
 );
 
@@ -184,6 +237,30 @@ const myCommand :Spk.Manifest.Command = (
   environ = [
     # Note that this defines the *entire* environment seen by your app.
     (key = "PATH", value = "/usr/local/bin:/usr/bin:/bin"),
+    (key = "WITH_API", value = "true"),
+    (key = "RICHER_CARD_COMMENT_EDITOR", value="false"),
+    (key = "SCROLLINERTIA", value="0"),
+    (key = "SCROLLAMOUNT", value="auto"),
+    (key = "CARD_OPENED_WEBHOOK_ENABLED", value="false"),
+    (key = "NOTIFICATION_TRAY_AFTER_READ_DAYS_BEFORE_REMOVE", value=""),
+    (key = "BIGEVENTS_PATTERN", value="NONE"),
+    (key = "MATOMO_ADDRESS", value=""),
+    (key = "MATOMO_SITE_ID", value=""),
+    (key = "MATOMO_DO_NOT_TRACK", value="true"),
+    (key = "MATOMO_WITH_USERNAME", value="false"),
+    (key = "BROWSER_POLICY_ENABLED", value="true"),
+    (key = "TRUSTED_URL", value=""),
+    (key = "WEBHOOKS_ATTRIBUTES", value=""),
+    (key = "OAUTH2_ENABLED", value=""),
+    (key = "OAUTH2_CLIENT_ID", value="false"),
+    (key = "OAUTH2_SECRET", value=""),
+    (key = "OAUTH2_SERVER_URL", value=""),
+    (key = "OAUTH2_AUTH_ENDPOINT", value=""),
+    (key = "OAUTH2_USERINFO_ENDPOINT", value=""),
+    (key = "OAUTH2_TOKEN_ENDPOINT", value=""),
+    (key = "LDAP_ENABLE", value="false"),
+    (key = "PASSWORD_LOGIN_ENABLED", value="true"),
+    (key = "SANDSTORM", value="1"),
     (key = "METEOR_SETTINGS", value = "{\"public\": {\"sandstorm\": true}}")
   ]
 );

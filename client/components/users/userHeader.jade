@@ -3,22 +3,56 @@ template(name="headerUserBar")
     a.header-user-bar-name.js-open-header-member-menu
       .header-user-bar-avatar
         +userAvatar(userId=currentUser._id)
-      if currentUser.profile.fullname
-        = currentUser.profile.fullname
-      else
-        = currentUser.username
+      unless isMiniScreen
+        unless isSandstorm
+          if currentUser.profile.fullname
+            = currentUser.profile.fullname
+          else
+            = currentUser.username
 
 template(name="memberMenuPopup")
   ul.pop-over-list
     with currentUser
-      li: a.js-edit-profile {{_ 'edit-profile'}}
-    li: a.js-change-avatar {{_ 'edit-avatar'}}
-    li: a.js-change-password {{_ 'changePasswordPopup-title'}}
-    li: a.js-change-language {{_ 'changeLanguagePopup-title'}}
-    li: a.js-edit-notification {{_ 'editNotificationPopup-title'}}
-  hr
-  ul.pop-over-list
-    li: a.js-logout {{_ 'log-out'}}
+      li
+        a.js-edit-profile
+          i.fa.fa-user
+          | {{_ 'edit-profile'}}
+      li
+        a.js-change-settings
+          i.fa.fa-cog
+          | {{_ 'change-settings'}}
+      li
+        a.js-change-avatar
+          i.fa.fa-picture-o
+          | {{_ 'edit-avatar'}}
+      unless isSandstorm
+        li
+          a.js-change-password
+            i.fa.fa-key
+            | {{_ 'changePasswordPopup-title'}}
+        li
+          a.js-change-language
+            i.fa.fa-flag
+            | {{_ 'changeLanguagePopup-title'}}
+    if currentUser.isAdmin
+      li
+        a.js-go-setting(href="{{pathFor 'setting'}}")
+          i.fa.fa-lock
+          | {{_ 'admin-panel'}}
+  unless currentUser.isWorker
+    hr
+    ul.pop-over-list
+      li
+        a(href="{{pathFor 'board' id=templatesBoardId slug=templatesBoardSlug}}")
+          i.fa.fa-clone
+          | {{_ 'templates'}}
+  unless isSandstorm
+    hr
+    ul.pop-over-list
+      li
+        a.js-logout
+          i.fa.fa-sign-out
+          | {{_ 'log-out'}}
 
 template(name="editProfilePopup")
   form
@@ -27,28 +61,28 @@ template(name="editProfilePopup")
       input.js-profile-fullname(type="text" value=profile.fullname autofocus)
     label
       | {{_ 'username'}}
-      input.js-profile-username(type="text" value=username)
+      span.error.hide.username-taken
+        | {{_ 'error-username-taken'}}
+      if allowUserNameChange
+        input.js-profile-username(type="text" value=username)
+      else
+        input.js-profile-username(type="text" value=username readonly)
     label
       | {{_ 'initials'}}
       input.js-profile-initials(type="text" value=profile.initials)
-    input.primary.wide(type="submit" value="{{_ 'save'}}")
-
-template(name="editNotificationPopup")
-  ul.pop-over-list
-    li
-      a.js-toggle-tag-notify-watch
-        i.fa.fa-eye.colorful
-        | {{_ 'watching'}}
-        if hasTag "notify-watch"
-          i.fa.fa-check
-        span.sub-name {{_ 'notify-watch'}}
-    li
-      a.js-toggle-tag-notify-participate
-        i.fa.fa-bell.colorful
-        | {{_ 'tracking'}}
-        if hasTag "notify-participate"
-          i.fa.fa-check
-        span.sub-name {{_ 'notify-participate'}}
+    label
+      | {{_ 'email'}}
+      span.error.hide.email-taken
+        | {{_ 'error-email-taken'}}
+      if allowEmailChange
+        input.js-profile-email(type="email" value="{{emails.[0].address}}")
+      else
+        input.js-profile-email(type="email" value="{{emails.[0].address}}" readonly)
+    div.buttonsContainer
+      input.primary.wide(type="submit" value="{{_ 'save'}}")
+      if allowUserDelete
+        div
+        input#deleteButton.primary.wide(type="button" value="{{_ 'delete'}}")
 
 template(name="changePasswordPopup")
   +atForm(state='changePwd')
@@ -61,3 +95,30 @@ template(name="changeLanguagePopup")
           = name
           if isCurrentLanguage
             i.fa.fa-check
+
+template(name="changeSettingsPopup")
+  ul.pop-over-list
+    //li
+    //  a.js-toggle-system-messages
+    //    i.fa.fa-comments-o
+    //    | {{_ 'hide-system-messages'}}
+    //    if hiddenSystemMessages
+    //      i.fa.fa-check
+    li
+      a.js-toggle-desktop-drag-handles
+        i.fa.fa-arrows
+        | {{_ 'show-desktop-drag-handles'}}
+        if showDesktopDragHandles
+          i.fa.fa-check
+    unless currentUser.isWorker
+      li
+        label.bold
+          i.fa.fa-sort-numeric-asc
+          | {{_ 'show-cards-minimum-count'}}
+        input#show-cards-count-at.inline-input.left(type="number" value="#{showCardsCountAt}" min="0" max="99" onkeydown="return false")
+        input.js-apply-show-cards-at.left(type="submit" value="{{_ 'apply'}}")
+
+template(name="userDeletePopup")
+  unless currentUser.isWorker
+    p {{_ 'delete-user-confirm-popup'}}
+    button.js-confirm.negate.full(type="submit") {{_ 'delete'}}

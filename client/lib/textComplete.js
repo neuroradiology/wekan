@@ -14,6 +14,7 @@ $.fn.escapeableTextComplete = function(strategies, options, ...otherArgs) {
         evt.stopPropagation();
         return commands.KEY_ENTER;
       }
+      return null;
     },
     ...options,
   };
@@ -44,11 +45,14 @@ $.fn.escapeableTextComplete = function(strategies, options, ...otherArgs) {
       });
     },
   });
+  return this;
 };
 
-EscapeActions.register('textcomplete',
+EscapeActions.register(
+  'textcomplete',
   () => {},
-  () => dropdownMenuIsOpened, {
+  () => dropdownMenuIsOpened,
+  {
     noClickEscapeOn: '.textcomplete-dropdown',
-  }
+  },
 );
