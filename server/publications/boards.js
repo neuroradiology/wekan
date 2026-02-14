@@ -2,59 +2,154 @@
 // non-archived boards:
 // 1. that the user is a member of
 // 2. the user has starred
-Meteor.publish('boards', function() {
+import { ReactiveCache } from '/imports/reactiveCache';
+import { publishComposite } from 'meteor/reywood:publish-composite';
+import Users from "../../models/users";
+import Org from "../../models/org";
+import Team from "../../models/team";
+import Attachments from '../../models/attachments';
+
+publishComposite('boards', function() {
+  const userId = this.userId;
+  // Ensure that the user is connected. If it is not, we need to return an empty
+  // array to tell the client to remove the previously published docs.
+  if (!Match.test(userId, String) || !userId) {
+    return [];
+  }
+
+  return {
+    find() {
+      return ReactiveCache.getBoards(
+        {
+          archived: false,
+          _id: { $in: Boards.userBoardIds(userId, false) },
+        },
+        {
+          sort: { sort: 1 /* boards default sorting */ },
+        },
+        true,
+      );
+    },
+    children: [
+      {
+        find(board) {
+          // Publish lists with extended fields for proper sync
+          // Including swimlaneId, modifiedAt, and _updatedAt for list order changes
+          return ReactiveCache.getLists(
+            { boardId: board._id, archived: false },
+            {
+              fields: {
+                _id: 1,
+                title: 1,
+                boardId: 1,
+                swimlaneId: 1,
+                archived: 1,
+                sort: 1,
+                modifiedAt: 1,
+                _updatedAt: 1,  // Hidden field to trigger updates
+              }
+            },
+            true,
+          );
+        }
+      },
+      {
+        find(board) {
+          return ReactiveCache.getCards(
+            { boardId: board._id, archived: false },
+            {
+              fields: {
+                _id: 1,
+                boardId: 1,
+                listId: 1,
+                archived: 1,
+                sort: 1
+              }
+            },
+            true,
+          );
+        }
+      }
+    ]
+  };
+});
+
+Meteor.publish('boardsReport', function() {
   const userId = this.userId;
   // Ensure that the user is connected. If it is not, we need to return an empty
   // array to tell the client to remove the previously published docs.
   if (!Match.test(userId, String) || !userId) return [];
 
-  // Defensive programming to verify that starredBoards has the expected
-  // format -- since the field is in the `profile` a user can modify it.
-  const { starredBoards = [] } = (Users.findOne(userId) || {}).profile || {};
-  check(starredBoards, [String]);
-
-  return Boards.find(
+  const boards = ReactiveCache.getBoards(
     {
-      archived: false,
-      $or: [
-        {
-          // _id: { $in: starredBoards },  // Commented out, to get a list of all public boards
-          permission: 'public',
-        },
-        { members: { $elemMatch: { userId, isActive: true } } },
-      ],
+      _id: { $in: Boards.userBoardIds(userId, null) },
     },
     {
       fields: {
         _id: 1,
+        boardId: 1,
         archived: 1,
         slug: 1,
         title: 1,
         description: 1,
         color: 1,
+        backgroundImageURL: 1,
         members: 1,
+        orgs: 1,
+        teams: 1,
         permission: 1,
         type: 1,
         sort: 1,
       },
       sort: { sort: 1 /* boards default sorting */ },
     },
+    true,
   );
+
+  const userIds = [];
+  const orgIds = [];
+  const teamIds = [];
+  boards.forEach(board => {
+    if (board.members) {
+      board.members.forEach(member => {
+        userIds.push(member.userId);
+      });
+    }
+    if (board.orgs) {
+      board.orgs.forEach(org => {
+        orgIds.push(org.orgId);
+      });
+    }
+    if (board.teams) {
+      board.teams.forEach(team => {
+        teamIds.push(team.teamId);
+      });
+    }
+  })
+
+  const ret = [
+    boards,
+    ReactiveCache.getUsers({ _id: { $in: userIds } }, { fields: Users.safeFields }, true),
+    ReactiveCache.getTeams({ _id: { $in: teamIds } }, {}, true),
+    ReactiveCache.getOrgs({ _id: { $in: orgIds } }, {}, true),
+  ]
+  return ret;
 });
 
 Meteor.publish('archivedBoards', function() {
   const userId = this.userId;
   if (!Match.test(userId, String)) return [];
 
-  return Boards.find(
+  const ret = ReactiveCache.getBoards(
     {
+      _id: { $in: Boards.userBoardIds(userId, true)},
       archived: true,
       members: {
-        $elemMatch: {
-          userId,
-          isAdmin: true,
-        },
-      },
+         $elemMatch: {
+           userId,
+           isAdmin: true,
+         },
+       },
     },
     {
       fields: {
@@ -62,149 +157,260 @@ Meteor.publish('archivedBoards', function() {
         archived: 1,
         slug: 1,
         title: 1,
+        createdAt: 1,
+        modifiedAt: 1,
+        archivedAt: 1,
       },
-      sort: { sort: 1 /* boards default sorting */ },
+      sort: { archivedAt: -1, modifiedAt: -1 },
     },
+    true,
   );
+  return ret;
 });
 
 // If isArchived = false, this will only return board elements which are not archived.
 // If isArchived = true, this will only return board elements which are archived.
-Meteor.publishRelations('board', function(boardId, isArchived) {
-  this.unblock();
+publishComposite('board', function(boardId, isArchived) {
   check(boardId, String);
   check(isArchived, Boolean);
+
   const thisUserId = this.userId;
   const $or = [{ permission: 'public' }];
 
-  if (thisUserId) {
-    $or.push({
-      members: { $elemMatch: { userId: thisUserId, isActive: true } },
-    });
+  let currUser = (!Match.test(thisUserId, String) || !thisUserId) ? 'undefined' : ReactiveCache.getUser(thisUserId);
+  let orgIdsUserBelongs = currUser !== 'undefined' && currUser.teams !== 'undefined' ? currUser.orgIdsUserBelongs() : '';
+  let teamIdsUserBelongs = currUser !== 'undefined' && currUser.teams !== 'undefined' ? currUser.teamIdsUserBelongs() : '';
+  let orgsIds = [];
+  let teamsIds = [];
+
+  if (orgIdsUserBelongs && orgIdsUserBelongs != '') {
+    orgsIds = orgIdsUserBelongs.split(',');
+  }
+  if (teamIdsUserBelongs && teamIdsUserBelongs != '') {
+    teamsIds = teamIdsUserBelongs.split(',');
   }
 
-  this.cursor(
-    Boards.find(
-      {
-        _id: boardId,
-        archived: false,
-        // If the board is not public the user has to be a member of it to see
-        // it.
-        $or,
-        // Sort required to ensure oplog usage
-      },
-      { limit: 1, sort: { sort: 1 /* boards default sorting */ } },
-    ),
-    function(boardId, board) {
-      this.cursor(Lists.find({ boardId, archived: isArchived }));
-      this.cursor(Swimlanes.find({ boardId, archived: isArchived }));
-      this.cursor(Integrations.find({ boardId }));
-      this.cursor(
-        CustomFields.find(
-          { boardIds: { $in: [boardId] } },
-          { sort: { name: 1 } },
-        ),
-      );
+  if (thisUserId) {
+    $or.push({ members: { $elemMatch: { userId: thisUserId, isActive: true } } });
+    $or.push({ 'orgs.orgId': { $in: orgsIds } });
+    $or.push({ 'teams.teamId': { $in: teamsIds } });
+  }
 
-      // Cards and cards comments
-      // XXX Originally we were publishing the card documents as a child of the
-      // list publication defined above using the following selector `{ listId:
-      // list._id }`. But it was causing a race condition in publish-composite,
-      // that I documented here:
-      //
-      //   https://github.com/englue/meteor-publish-composite/issues/29
-      //
-      // cottz:publish had a similar problem:
-      //
-      //   https://github.com/Goluis/cottz-publish/issues/4
-      //
-      // The current state of relational publishing in meteor is a bit sad,
-      // there are a lot of various packages, with various APIs, some of them
-      // are unmaintained. Fortunately this is something that will be fixed by
-      // meteor-core at some point:
-      //
-      //   https://trello.com/c/BGvIwkEa/48-easy-joins-in-subscriptions
-      //
-      // And in the meantime our code below works pretty well -- it's not even a
-      // hack!
-
-      // Gather queries and send in bulk
-      const cardComments = this.join(CardComments);
-      cardComments.selector = _ids => ({ cardId: _ids });
-      const attachments = this.join(Attachments);
-      attachments.selector = _ids => ({ cardId: _ids });
-      const checklists = this.join(Checklists);
-      checklists.selector = _ids => ({ cardId: _ids });
-      const checklistItems = this.join(ChecklistItems);
-      checklistItems.selector = _ids => ({ cardId: _ids });
-      const parentCards = this.join(Cards);
-      parentCards.selector = _ids => ({ parentId: _ids });
-      const boards = this.join(Boards);
-      const subCards = this.join(Cards);
-      subCards.selector = _ids => ({ _id: _ids, archived: isArchived });
-
-      this.cursor(
-        Cards.find({
-          boardId: { $in: [boardId, board.subtasksDefaultBoardId] },
-          archived: isArchived,
-        }),
-        function(cardId, card) {
-          if (card.type === 'cardType-linkedCard') {
-            const impCardId = card.linkedId;
-            subCards.push(impCardId); // GitHub issue #2688 and #2693
-            cardComments.push(impCardId);
-            attachments.push(impCardId);
-            checklists.push(impCardId);
-            checklistItems.push(impCardId);
-          } else if (card.type === 'cardType-linkedBoard') {
-            boards.push(card.linkedId);
-          }
-          cardComments.push(cardId);
-          attachments.push(cardId);
-          checklists.push(cardId);
-          checklistItems.push(cardId);
-          parentCards.push(cardId);
+  return {
+    find() {
+      return ReactiveCache.getBoards(
+        {
+          _id: boardId,
+          archived: false,
+          // If the board is not public the user has to be a member of it to see it.
+          $or,
         },
+        { limit: 1, sort: { sort: 1 /* boards default sorting */ } },
+        true,
       );
-
-      // Send bulk queries for all found ids
-      subCards.send();
-      cardComments.send();
-      attachments.send();
-      checklists.send();
-      checklistItems.send();
-      boards.send();
-      parentCards.send();
-
-      if (board.members) {
-        // Board members. This publication also includes former board members that
-        // aren't members anymore but may have some activities attached to them in
-        // the history.
-        const memberIds = _.pluck(board.members, 'userId');
-
-        // We omit the current user because the client should already have that data,
-        // and sending it triggers a subtle bug:
-        // https://github.com/wefork/wekan/issues/15
-        this.cursor(
-          Users.find(
-            {
-              _id: { $in: _.without(memberIds, thisUserId) },
-            },
-            {
-              fields: {
-                username: 1,
-                'profile.fullname': 1,
-                'profile.avatarUrl': 1,
-                'profile.initials': 1,
-              },
-            },
-          ),
-        );
-
-        this.cursor(presences.find({ userId: { $in: memberIds } }));
-      }
     },
-  );
+    children: [
+      // Lists
+      {
+        find(board) {
+          return ReactiveCache.getLists({ boardId: board._id, archived: isArchived }, {}, true);
+        }
+      },
+      // Swimlanes
+      {
+        find(board) {
+          return ReactiveCache.getSwimlanes({ boardId: board._id, archived: isArchived }, {}, true);
+        }
+      },
+      // Integrations
+      {
+        find(board) {
+          return ReactiveCache.getIntegrations({ boardId: board._id }, {}, true);
+        }
+      },
+      // CardCommentReactions at board level
+      {
+        find(board) {
+          return ReactiveCache.getCardCommentReactions({ boardId: board._id }, {}, true);
+        }
+      },
+      // CustomFields
+      {
+        find(board) {
+          return ReactiveCache.getCustomFields(
+            { boardIds: { $in: [board._id] } },
+            { sort: { name: 1 } },
+            true,
+          );
+        }
+      },
+      // Cards and their related data
+      {
+        find(board) {
+          const cardSelector = {
+            boardId: { $in: [board._id, board.subtasksDefaultBoardId] },
+            archived: isArchived,
+          };
 
-  return this.ready();
+          // Check if current user has assigned-only permissions
+          if (thisUserId && board.members) {
+            const member = _.findWhere(board.members, { userId: thisUserId, isActive: true });
+            if (member && (member.isNormalAssignedOnly || member.isCommentAssignedOnly || member.isReadAssignedOnly)) {
+              // User with assigned-only permissions should only see cards assigned to them
+              cardSelector.assignees = { $in: [thisUserId] };
+            }
+          }
+
+          return ReactiveCache.getCards(cardSelector, {}, true);
+        },
+        children: [
+          // CardComments for each card
+          {
+            find(card) {
+              return CardComments.find({ cardId: card._id });
+            }
+          },
+          // CardCommentReactions for each card
+          {
+            find(card) {
+              return CardCommentReactions.find({ cardId: card._id });
+            }
+          },
+          // Attachments for each card
+          {
+            find(card) {
+              return Attachments.collection.find({ 'meta.cardId': card._id });
+            }
+          },
+          // Checklists for each card
+          {
+            find(card) {
+              return Checklists.find({ cardId: card._id });
+            }
+          },
+          // ChecklistItems for each card
+          {
+            find(card) {
+              return ChecklistItems.find({ cardId: card._id });
+            }
+          },
+          // Parent cards (cards that have this card as parentId)
+          {
+            find(card) {
+              return Cards.find({ parentId: card._id });
+            }
+          },
+          // Linked card data (for cardType-linkedCard)
+          {
+            find(card) {
+              if (card.type === 'cardType-linkedCard' && card.linkedId) {
+                return Cards.find({ _id: card.linkedId, archived: isArchived });
+              }
+              return null;
+            },
+            children: [
+              // Comments for linked card
+              {
+                find(linkedCard) {
+                  return CardComments.find({ cardId: linkedCard._id });
+                }
+              },
+              // Attachments for linked card
+              {
+                find(linkedCard) {
+                  return Attachments.collection.find({ 'meta.cardId': linkedCard._id });
+                }
+              },
+              // Checklists for linked card
+              {
+                find(linkedCard) {
+                  return Checklists.find({ cardId: linkedCard._id });
+                }
+              },
+              // ChecklistItems for linked card
+              {
+                find(linkedCard) {
+                  return ChecklistItems.find({ cardId: linkedCard._id });
+                }
+              }
+            ]
+          },
+          // Linked board (for cardType-linkedBoard)
+          {
+            find(card) {
+              if (card.type === 'cardType-linkedBoard' && card.linkedId) {
+                return Boards.find({ _id: card.linkedId });
+              }
+              return null;
+            }
+          },
+          // Cards in linked board (for cardType-linkedBoard)
+          {
+            find(card) {
+              if (card.type === 'cardType-linkedBoard' && card.linkedId) {
+                return Cards.find({ boardId: card.linkedId });
+              }
+              return null;
+            }
+          },
+          // Comments for linked board cards (for cardType-linkedBoard)
+          {
+            find(card) {
+              if (card.type === 'cardType-linkedBoard' && card.linkedId) {
+                return CardComments.find({ boardId: card.linkedId });
+              }
+              return null;
+            }
+          }
+        ]
+      },
+      // Board members/Users
+      {
+        find(board) {
+          if (board.members) {
+            // Board members. This publication also includes former board members that
+            // aren't members anymore but may have some activities attached to them in
+            // the history.
+            const memberIds = _.pluck(board.members, 'userId');
+
+            // We omit the current user because the client should already have that data,
+            // and sending it triggers a subtle bug:
+            // https://github.com/wefork/wekan/issues/15
+            return ReactiveCache.getUsers(
+              {
+                _id: { $in: _.without(memberIds, thisUserId) },
+              },
+              {
+                fields: {
+                  username: 1,
+                  'profile.fullname': 1,
+                  'profile.avatarUrl': 1,
+                  'profile.initials': 1,
+                },
+              },
+              true,
+            );
+          }
+          return null;
+        }
+      }
+    ]
+  };
+});
+
+Meteor.methods({
+  copyBoard(boardId, properties) {
+    check(boardId, String);
+    check(properties, Object);
+
+    let ret = null;
+    const board = ReactiveCache.getBoard(boardId);
+    if (board) {
+      for (const key in properties) {
+        board[key] = properties[key];
+      }
+      ret = board.copy();
+    }
+    return ret;
+  },
 });

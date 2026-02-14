@@ -1,20 +1,36 @@
+import { ReactiveCache } from '/imports/reactiveCache';
+import { TAPi18n } from '/imports/i18n';
+
 BlazeComponent.extendComponent({
-  onCreated() {},
+  onCreated() {
+    // Ensure boards are available for action dropdowns
+    this.subscribe('boards');
+  },
 
   boards() {
-    const boards = Boards.find(
+    const ret = ReactiveCache.getBoards(
       {
         archived: false,
         'members.userId': Meteor.userId(),
         _id: {
-          $ne: Meteor.user().getTemplatesBoardId(),
+          $ne: ReactiveCache.getCurrentUser().getTemplatesBoardId(),
         },
       },
       {
         sort: { sort: 1 /* boards default sorting */ },
       },
     );
-    return boards;
+    return ret;
+  },
+
+  loadingBoardsLabel() {
+    try {
+      const txt = TAPi18n.__('loading-boards');
+      if (txt && !txt.startsWith("key '")) return txt;
+    } catch (e) {
+      // ignore translation lookup errors
+    }
+    return 'Loading boards...';
   },
 
   events() {
@@ -68,8 +84,8 @@ BlazeComponent.extendComponent({
           const ruleName = this.data().ruleName.get();
           const trigger = this.data().triggerVar.get();
           const actionSelected = this.find('#move-spec-action').value;
-          const swimlaneName = this.find('#swimlaneName').value;
-          const listName = this.find('#listName').value;
+          const swimlaneName = this.find('#swimlaneName').value || '*';
+          const listName = this.find('#listName').value || '*';
           const boardId = Session.get('currentBoard');
           const destBoardId = this.find('#board-id').value;
           const desc = Utils.getTriggerActionDesc(event, this);
@@ -177,6 +193,29 @@ BlazeComponent.extendComponent({
               boardId,
             });
           }
+        },
+        'click .js-link-card-action'(event) {
+          const ruleName = this.data().ruleName.get();
+          const trigger = this.data().triggerVar.get();
+          const swimlaneName = this.find('#swimlaneName-link').value || '*';
+          const listName = this.find('#listName-link').value || '*';
+          const boardId = Session.get('currentBoard');
+          const destBoardId = this.find('#board-id-link').value;
+          const desc = Utils.getTriggerActionDesc(event, this);
+          const triggerId = Triggers.insert(trigger);
+          const actionId = Actions.insert({
+            actionType: 'linkCard',
+            listName,
+            swimlaneName,
+            boardId: destBoardId,
+            desc,
+          });
+          Rules.insert({
+            title: ruleName,
+            triggerId,
+            actionId,
+            boardId,
+          });
         },
       },
     ];

@@ -1,16 +1,7 @@
+import { ReactiveCache } from '/imports/reactiveCache';
 import { Meteor } from 'meteor/meteor';
 
 Triggers = new Mongo.Collection('triggers');
-
-Triggers.mutations({
-  rename(description) {
-    return {
-      $set: {
-        description,
-      },
-    };
-  },
-});
 
 Triggers.before.insert((userId, doc) => {
   doc.createdAt = new Date();
@@ -24,37 +15,41 @@ Triggers.before.update((userId, doc, fieldNames, modifier) => {
 
 Triggers.allow({
   insert(userId, doc) {
-    return allowIsBoardAdmin(userId, Boards.findOne(doc.boardId));
+    return allowIsBoardAdmin(userId, ReactiveCache.getBoard(doc.boardId));
   },
   update(userId, doc) {
-    return allowIsBoardAdmin(userId, Boards.findOne(doc.boardId));
+    return allowIsBoardAdmin(userId, ReactiveCache.getBoard(doc.boardId));
   },
   remove(userId, doc) {
-    return allowIsBoardAdmin(userId, Boards.findOne(doc.boardId));
+    return allowIsBoardAdmin(userId, ReactiveCache.getBoard(doc.boardId));
   },
 });
 
 Triggers.helpers({
+  async rename(description) {
+    return await Triggers.updateAsync(this._id, {
+      $set: { description },
+    });
+  },
+
   description() {
     return this.desc;
   },
 
   getRule() {
-    return Rules.findOne({
-      triggerId: this._id,
-    });
+    return ReactiveCache.getRule({ triggerId: this._id });
   },
 
   fromList() {
-    return Lists.findOne(this.fromId);
+    return ReactiveCache.getList(this.fromId);
   },
 
   toList() {
-    return Lists.findOne(this.toId);
+    return ReactiveCache.getList(this.toId);
   },
 
   findList(title) {
-    return Lists.findOne({
+    return ReactiveCache.getList({
       title,
     });
   },
@@ -69,8 +64,8 @@ Triggers.helpers({
 });
 
 if (Meteor.isServer) {
-  Meteor.startup(() => {
-    Triggers._collection._ensureIndex({ modifiedAt: -1 });
+  Meteor.startup(async () => {
+    await Triggers._collection.createIndexAsync({ modifiedAt: -1 });
   });
 }
 

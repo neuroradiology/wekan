@@ -1,3 +1,5 @@
+import { TAPi18n } from '/imports/i18n';
+
 window.Popup = new (class {
   constructor() {
     // The template we use to render popups
@@ -30,7 +32,11 @@ window.Popup = new (class {
     function clickFromPopup(evt) {
       return $(evt.target).closest('.js-pop-over').length !== 0;
     }
-    return function(evt) {
+    /** opens the popup
+     * @param evt the current event
+     * @param options options (dataContextIfCurrentDataIsUndefined use this dataContext if this.currentData() is undefined)
+     */
+    return function(evt, options) {
       // If a popup is already opened, clicking again on the opener element
       // should close it -- and interrupt the current `open` function.
       if (self.isOpen()) {
@@ -40,6 +46,8 @@ window.Popup = new (class {
           return;
         } else {
           $(previousOpenerElement).removeClass('is-active');
+          // Clean up previous popup content to prevent mixing
+          self._cleanupPreviousPopupContent();
         }
       }
 
@@ -49,10 +57,15 @@ window.Popup = new (class {
       // has one. This allows us to position a sub-popup exactly at the same
       // position than its parent.
       let openerElement;
-      if (clickFromPopup(evt)) {
+      if (clickFromPopup(evt) && self._getTopStack()) {
         openerElement = self._getTopStack().openerElement;
       } else {
-        self._stack = [];
+        // For Member Settings sub-popups, always start fresh to avoid content mixing
+        if (popupName.includes('changeLanguage') || popupName.includes('changeAvatar') ||
+            popupName.includes('editProfile') || popupName.includes('changePassword') ||
+            popupName.includes('invitePeople') || popupName.includes('support')) {
+          self._stack = [];
+        }
         openerElement = evt.currentTarget;
       }
       $(openerElement).addClass('is-active');
@@ -67,8 +80,16 @@ window.Popup = new (class {
         title: self._getTitle(popupName),
         depth: self._stack.length,
         offset: self._getOffset(openerElement),
-        dataContext: (this && this.currentData && this.currentData()) || this,
+        dataContext: (this && this.currentData && this.currentData()) || (options && options.dataContextIfCurrentDataIsUndefined) || this,
       });
+
+      const $contentWrapper = $('.content-wrapper')
+      if ($contentWrapper.length > 0) {
+        const contentWrapper = $contentWrapper[0];
+        self._getTopStack().scrollTop = contentWrapper.scrollTop;
+        // scroll from e.g. delete comment to the top (where the confirm button is)
+        $contentWrapper.scrollTop(0);
+      }
 
       // If there are no popup currently opened we use the Blaze API to render
       // one into the DOM. We use a reactive function as the data parameter that
@@ -80,6 +101,10 @@ window.Popup = new (class {
       // our internal dependency, and since we just changed the top element of
       // our internal stack, the popup will be updated with the new data.
       if (!self.isOpen()) {
+        if (!Template[popupName]) {
+          console.error('Template not found:', popupName);
+          return;
+        }
         self.current = Blaze.renderWithData(
           self.template,
           () => {
@@ -123,6 +148,21 @@ window.Popup = new (class {
   /// steps back is greater than the popup stack size, the popup will be closed.
   back(n = 1) {
     if (this._stack.length > n) {
+      const $contentWrapper = $('.content-wrapper')
+      if ($contentWrapper.length > 0) {
+        const contentWrapper = $contentWrapper[0];
+        const stack = this._stack[this._stack.length - n];
+        // scrollTopMax and scrollLeftMax only available at Firefox (https://developer.mozilla.org/en-US/docs/Web/API/Element/scrollTopMax)
+        const scrollTopMax = contentWrapper.scrollTopMax || contentWrapper.scrollHeight - contentWrapper.clientHeight;
+        if (scrollTopMax && stack.scrollTop > scrollTopMax) {
+          // sometimes scrollTopMax is lower than scrollTop, so i need this dirty hack
+          setTimeout(() => {
+            $contentWrapper.scrollTop(stack.scrollTop);
+          }, 6);
+        }
+        // restore the old popup scroll position
+        $contentWrapper.scrollTop(stack.scrollTop);
+      }
       _.times(n, () => this._stack.pop());
       this._dep.changed();
     } else {
@@ -140,17 +180,26 @@ window.Popup = new (class {
       $(openerElement).removeClass('is-active');
 
       this._stack = [];
+      // Clean up popup content when closing
+      this._cleanupPreviousPopupContent();
     }
   }
 
-  getOpenerComponent() {
-    const { openerElement } = Template.parentData(4);
+  getOpenerComponent(n=4) {
+    const { openerElement } = Template.parentData(n);
     return BlazeComponent.getComponentForElement(openerElement);
   }
 
-  // An utility fonction that returns the top element of the internal stack
+  // An utility function that returns the top element of the internal stack
   _getTopStack() {
     return this._stack[this._stack.length - 1];
+  }
+
+  _cleanupPreviousPopupContent() {
+    // Force a re-render to ensure proper cleanup
+    if (this._dep) {
+      this._dep.changed();
+    }
   }
 
   // We automatically calculate the popup offset from the reference element
@@ -163,12 +212,61 @@ window.Popup = new (class {
 
       if (Utils.isMiniScreen()) return { left: 0, top: 0 };
 
+      // If the opener element is missing (e.g., programmatic open), fallback to viewport origin
+      if (!$element || $element.length === 0) {
+        return { left: 10, top: 10, maxHeight: $(window).height() - 20 };
+      }
+
       const offset = $element.offset();
-      const popupWidth = 300 + 15;
-      return {
-        left: Math.min(offset.left, $(window).width() - popupWidth),
-        top: offset.top + $element.outerHeight(),
-      };
+      // Calculate actual popup width based on CSS: min(380px, 55vw)
+      const viewportWidth = $(window).width();
+      const viewportHeight = $(window).height();
+      const popupWidth = Math.min(380, viewportWidth * 0.55) + 15; // Add 15px for margin
+
+      // Check if this is an admin panel edit popup
+      const isAdminEditPopup = $element.hasClass('edit-user') ||
+                              $element.hasClass('edit-org') ||
+                              $element.hasClass('edit-team');
+
+      if (isAdminEditPopup) {
+        // Center the popup horizontally and use full height
+        const centeredLeft = (viewportWidth - popupWidth) / 2;
+
+        return {
+          left: Math.max(10, centeredLeft), // Ensure popup doesn't go off screen
+          top: 10, // Start from top with small margin
+          maxHeight: viewportHeight - 20, // Use full height minus small margins
+        };
+      }
+
+      // Calculate available height for popup
+      const popupTop = offset.top + $element.outerHeight();
+
+      // For language popup, don't use dynamic height to avoid overlapping board
+      const isLanguagePopup = $element.hasClass('js-change-language');
+      let availableHeight, maxPopupHeight;
+
+      if (isLanguagePopup) {
+        // For language popup, position content area below right vertical scrollbar
+        const availableHeight = viewportHeight - popupTop - 20; // 20px margin from bottom (near scrollbar)
+        const calculatedHeight = Math.min(availableHeight, viewportHeight * 0.5); // Max 50% of viewport
+
+        return {
+          left: Math.min(offset.left, viewportWidth - popupWidth),
+          top: popupTop,
+          maxHeight: Math.max(calculatedHeight, 200), // Minimum 200px height
+        };
+      } else {
+        // For other popups, use the dynamic height calculation
+        availableHeight = viewportHeight - popupTop - 20; // 20px margin from bottom
+        maxPopupHeight = Math.min(availableHeight, viewportHeight * 0.8); // Max 80% of viewport
+
+        return {
+          left: Math.min(offset.left, viewportWidth - popupWidth),
+          top: popupTop,
+          maxHeight: Math.max(maxPopupHeight, 200), // Minimum 200px height
+        };
+      }
     };
   }
 
@@ -201,7 +299,7 @@ escapeActions.forEach(actionName => {
     () => Popup[actionName](),
     () => Popup.isOpen(),
     {
-      noClickEscapeOn: '.js-pop-over,.js-open-card-title-popup',
+      noClickEscapeOn: '.js-pop-over,.js-open-card-title-popup,.js-open-inlined-form,.textcomplete-dropdown',
       enabledOnClick: actionName === 'close',
     },
   );

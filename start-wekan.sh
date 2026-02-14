@@ -3,29 +3,82 @@
 # If you want to restart even on crash, uncomment while and done lines.
 #while true; do
       cd .build/bundle
-      #---------------------------------------------
+      #-------------------- REQUIRED SETTINGS START --------------------
+      # WRITEABLE PATH REQUIRED TO EXISTS AND BE WRITABLE FOR ATTACHMENTS TO WORK
+      export WRITABLE_PATH=..
+      #-----------------------------------------------------------------
+      # MongoDB database URL required
+      export MONGO_URL=mongodb://127.0.0.1:27017/wekan
+      # MONGO_PASSWORD_FILE : MongoDB password file (Docker secrets)
+      # example : export MONGO_PASSWORD_FILE=/run/secrets/mongo_password
+      #export MONGO_PASSWORD_FILE=
+      #-----------------------------------------------------------------
+      # MONGO_OPLOG_URL: MongoDB oplog connection (highly recommended for pub/sub performance)
+      # Required for Meteor reactive subscriptions to work efficiently
+      # Must point to a MongoDB replica set (local oplog or remote)
+      # For local MongoDB with replicaSet named 'rs0', use:
+      #   export MONGO_OPLOG_URL=mongodb://127.0.0.1:27017/local?replicaSet=rs0
+      # For production with credentials and remote MongoDB:
+      #   export MONGO_OPLOG_URL=mongodb://<user>:<password>@<host>:<port>/local?authSource=admin&replicaSet=rsWekan
+      # Without this, Meteor falls back to polling which increases CPU usage and latency
+      #export MONGO_OPLOG_URL=mongodb://127.0.0.1:27017/local?replicaSet=rs0
+      #-----------------------------------------------------------------
+      # If port is 80, must change ROOT_URL to: http://YOUR-WEKAN-SERVER-IPv4-ADDRESS , like http://192.168.0.100
+      # If port is not 80, must change ROOT_URL to: http://YOUR-WEKAN-SERVER-IPv4-ADDRESS:YOUR-PORT-NUMBER , like http://192.168.0.100:2000
+      # If ROOT_URL is not correct, these do not work: translations, uploading attachments.
+      export ROOT_URL=http://localhost:2000
+      # If at public Internet, required different SSL/TLS settings:
+      # - https://github.com/wekan/wekan/wiki/Settings
+      # - Also at wiki: SSL/TLS config for Caddy/Nginx/Apache
+      #-----------------------------------------------------------------
+      # Must change to YOUR-PORT-NUMBER:
+      export PORT=2000
+      #-------------------- REQUIRED SETTINGS END ----------------------
+      #
+      #-------------------- OPTIONAL SETTINGS START --------------------
+      # If at public Internet, required different settings:
+      # - For ROOT_URL: https://github.com/wekan/wekan/wiki/Settings
+      # - For SSL/TLS, also at above wiki right menu: config for Caddy/Nginx/Apache
+      #-----------------------------------------------------------------
       # Debug OIDC OAuth2 etc.
       #export DEBUG=true
-      #---------------------------------------------
-      export MONGO_URL='mongodb://127.0.0.1:27017/wekan'
-      #---------------------------------------------
-      # Production: https://example.com/wekan
-      # Local: http://localhost:2000
-      #export ipaddress=$(ifdata -pa eth0)
-      export ROOT_URL='http://localhost:2000'
-      #---------------------------------------------
+      #-----------------------------------------------------------------
+      # ==== AWS S3 FOR FILES ====
+      # Any region. For example:
+      #   us-standard,us-west-1,us-west-2,
+      #   eu-west-1,eu-central-1,
+      #   ap-southeast-1,ap-northeast-1,sa-east-1
+      #
+      #export S3='{"s3":{"key": "xxx", "secret": "xxx", "bucket": "xxx", "region": "xxx"}}'
+      # S3_SECRET_FILE : S3 secret file (Docker secrets)
+      # example : export S3_SECRET_FILE=/run/secrets/s3_secret
+      #export S3_SECRET_FILE=
+      #-----------------------------------------------------------------
       # https://github.com/wekan/wekan/wiki/Troubleshooting-Mail
       # https://github.com/wekan/wekan-mongodb/blob/master/docker-compose.yml
-      export MAIL_URL='smtp://user:pass@mailserver.example.com:25/'
+      export MAIL_URL=smtp://user:pass@mailserver.example.com:25/
+      export MAIL_FROM='Wekan Boards <info@example.com>'
+      # Currently MAIL_SERVICE is not in use.
+      #export MAIL_SERVICE=Outlook365
+      #export MAIL_SERVICE_USER=firstname.lastname@hotmail.com
+      #export MAIL_SERVICE_PASSWORD=SecretPassword
+      # MAIL_SERVICE_PASSWORD_FILE : Password file for mail service (Docker secrets)
+      # example : export MAIL_SERVICE_PASSWORD_FILE=/run/secrets/mail_service_password
+      #export MAIL_SERVICE_PASSWORD_FILE=
       #---------------------------------------------
       #export KADIRA_OPTIONS_ENDPOINT=http://127.0.0.1:11011
       #---------------------------------------------
-      # This is local port where Wekan Node.js runs, same as below on Caddyfile settings.
-      export PORT=2000
+      #---------------------------------------------
+      # ==== NUMBER OF SEARCH RESULTS PER PAGE BY DEFAULT ====
+      #export RESULTS_PER_PAGE=20
       #---------------------------------------------
       # Wekan Export Board works when WITH_API=true.
       # If you disable Wekan API with false, Export Board does not work.
-      export WITH_API='true'
+      export WITH_API=true
+      #---------------------------------------------------------------
+      # ==== AFTER OIDC LOGIN, ADD USERS AUTOMATICALLY TO THIS BOARD ID ====
+      # https://github.com/wekan/wekan/pull/5098
+      #- DEFAULT_BOARD_ID=abcd1234
       #---------------------------------------------------------------
       # ==== PASSWORD BRUTE FORCE PROTECTION ====
       #https://atmospherejs.com/lucasantoniassi/accounts-lockout
@@ -37,14 +90,24 @@
       #export ACCOUNTS_LOCKOUT_UNKNOWN_USERS_LOCKOUT_PERIOD=60
       #export ACCOUNTS_LOCKOUT_UNKNOWN_USERS_FAILURE_WINDOW=15
       #---------------------------------------------------------------
+      # ==== ACCOUNT OPTIONS ====
+      # https://docs.meteor.com/api/accounts-multi.html#AccountsCommon-config
+      # Defaults below. Uncomment to change. wekan/server/accounts-common.js
+      # - ACCOUNTS_COMMON_LOGIN_EXPIRATION_IN_DAYS=90
+      #---------------------------------------------------------------
+      # ==== Allow configuration to validate uploaded attachments ====
+      #export ATTACHMENTS_UPLOAD_EXTERNAL_PROGRAM="/usr/local/bin/avscan {file}"
+      #export ATTACHMENTS_UPLOAD_MIME_TYPES="image/*,text/*"
+      #export ATTACHMENTS_UPLOAD_MAX_SIZE=5000000
+      #---------------------------------------------------------------
+      # ==== Allow configuration to validate uploaded avatars ====
+      #export AVATARS_UPLOAD_EXTERNAL_PROGRAM="/usr/local/bin/avscan {file}"
+      #export AVATARS_UPLOAD_MIME_TYPES="image/*"
+      #export AVATARS_UPLOAD_MAX_SIZE=500000
+      #---------------------------------------------------------------
       # ==== RICH TEXT EDITOR IN CARD COMMENTS ====
       # https://github.com/wekan/wekan/pull/2560
       export RICHER_CARD_COMMENT_EDITOR=false
-      #---------------------------------------------------------------
-      # ==== MOUSE SCROLL ====
-      # https://github.com/wekan/wekan/issues/2949
-      export SCROLLINERTIA=0
-      export SCROLLAMOUNT=auto
       #---------------------------------------------------------------
       # ==== CARD OPENED, SEND WEBHOOK MESSAGE ====
       export CARD_OPENED_WEBHOOK_ENABLED=false
@@ -113,6 +176,11 @@
       ## The option that allows matomo to retrieve the username:
       # Example: export MATOMO_WITH_USERNAME=true
       #export MATOMO_WITH_USERNAME='false'
+      #---------------------------------------------
+      # ==== METRICS ALLOWED IP ADDRESSES ====
+      # https://github.com/wekan/wekan/wiki/Metrics
+      #export METRICS_ALLOWED_IP_ADDRESSES=192.168.0.100,192.168.0.200
+      #-----------------------------------------------------------------
       # Enable browser policy and allow one trusted URL that can have iframe that has Wekan embedded inside.
       # Setting this to false is not recommended, it also disables all other browser policy protections
       # and allows all iframing etc. See wekan/server/policy.js
@@ -125,6 +193,13 @@
       # Example: export WEBHOOKS_ATTRIBUTES=cardId,listId,oldListId,boardId,comment,user,card,commentId
       export WEBHOOKS_ATTRIBUTES=''
       #---------------------------------------------
+      # ==== AUTOLOGIN WITH OIDC/OAUTH2 ====
+      # https://github.com/wekan/wekan/wiki/autologin
+      #export OIDC_REDIRECTION_ENABLED=true
+      #---------------------------------------------
+      # OAUTH2 ORACLE on premise identity manager OIM
+      #export ORACLE_OIM_ENABLED=true
+      #---------------------------------------------
       # ==== OAUTH2 AZURE ====
       # https://github.com/wekan/wekan/wiki/Azure
       # 1) Register the application with Azure. Make sure you capture
@@ -132,23 +207,42 @@
       # 2) Configure the environment variables. This differs slightly
       #     by installation type, but make sure you have the following:
       #export OAUTH2_ENABLED=true
+      #
+      # Optional OAuth2 CA Cert, see https://github.com/wekan/wekan/issues/3299
+      #export OAUTH2_CA_CERT=ABCD1234
+      #
+      # Use OAuth2 ADFS additional changes. Also needs OAUTH2_ENABLED=true setting.
+      #export OAUTH2_ADFS_ENABLED=false
+      #
+      # Azure AD B2C. https://github.com/wekan/wekan/issues/5242
+      #export OAUTH2_B2C_ENABLED=false
+      #
       # OAuth2 docs: https://github.com/wekan/wekan/wiki/OAuth2
       # OAuth2 login style: popup or redirect.
       #export OAUTH2_LOGIN_STYLE=redirect
+      #
       # Application GUID captured during app registration:
       #export OAUTH2_CLIENT_ID=xxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxx
+      #
       # Secret key generated during app registration:
       #export OAUTH2_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+      # OAUTH2_SECRET_FILE : Secret key file for OAuth2 (Docker secrets)
+      # example : export OAUTH2_SECRET_FILE=/run/secrets/oauth2_secret
+      #export OAUTH2_SECRET_FILE=
       #export OAUTH2_SERVER_URL=https://login.microsoftonline.com/
       #export OAUTH2_AUTH_ENDPOINT=/oauth2/v2.0/authorize
       #export OAUTH2_USERINFO_ENDPOINT=https://graph.microsoft.com/oidc/userinfo
       #export OAUTH2_TOKEN_ENDPOINT=/oauth2/v2.0/token
+      #
       # The claim name you want to map to the unique ID field:
       #export OAUTH2_ID_MAP=email
+      #
       # The claim name you want to map to the username field:
       #export OAUTH2_USERNAME_MAP=email
+      #
       # The claim name you want to map to the full name field:
       #export OAUTH2_FULLNAME_MAP=name
+      #
       # The claim name you want to map to the email field:
       #export OAUTH2_EMAIL_MAP=email
       #-----------------------------------------------------------------
@@ -158,11 +252,15 @@
       # OAuth2 login style: popup or redirect.
       #export OAUTH2_LOGIN_STYLE=redirect
       #export OAUTH2_CLIENT_ID=<Keycloak create Client ID>
-      #export OAUTH2_SERVER_URL=<Keycloak server name>/auth
+      #export OAUTH2_SERVER_URL=<Keycloak server URL - https://keycloak.example.com>
       #export OAUTH2_AUTH_ENDPOINT=/realms/<keycloak realm>/protocol/openid-connect/auth
       #export OAUTH2_USERINFO_ENDPOINT=/realms/<keycloak realm>/protocol/openid-connect/userinfo
       #export OAUTH2_TOKEN_ENDPOINT=/realms/<keycloak realm>/protocol/openid-connect/token
       #export OAUTH2_SECRET=<keycloak client secret>
+      #export OAUTH2_ID_MAP=sub
+      #export OAUTH2_USERNAME_MAP=preferred_username
+      #export OAUTH2_EMAIL_MAP=email
+      #export OAUTH2_FULLNAME_MAP=name
       #-----------------------------------------------------------------
       # ==== OAUTH2 DOORKEEPER ====
       # OAuth2 docs: https://github.com/wekan/wekan/wiki/OAuth2
@@ -170,63 +268,124 @@
       # https://github.com/wekan/wekan/wiki/OAuth2
       # Enable the OAuth2 connection
       #export OAUTH2_ENABLED=true
+      #
       # OAuth2 login style: popup or redirect.
       #export OAUTH2_LOGIN_STYLE=redirect
+      #
       # OAuth2 Client ID.
       #export OAUTH2_CLIENT_ID=abcde12345
+      #
       # OAuth2 Secret.
       #export OAUTH2_SECRET=54321abcde
+      #
       # OAuth2 Server URL.
       #export OAUTH2_SERVER_URL=https://chat.example.com
+      #
       # OAuth2 Authorization Endpoint.
       #export OAUTH2_AUTH_ENDPOINT=/oauth/authorize
+      #
       # OAuth2 Userinfo Endpoint.
       #export OAUTH2_USERINFO_ENDPOINT=/oauth/userinfo
+      #
       # OAuth2 Token Endpoint.
       #export OAUTH2_TOKEN_ENDPOINT=/oauth/token
+      #
       # OAUTH2 ID Token Whitelist Fields.
       #export OAUTH2_ID_TOKEN_WHITELIST_FIELDS=[]
+      #
       # OAUTH2 Request Permissions.
-      #export OAUTH2_REQUEST_PERMISSIONS='openid profile email'
+      #export OAUTH2_REQUEST_PERMISSIONS=openid profile email
+      #
       # OAuth2 ID Mapping
       #export OAUTH2_ID_MAP=
+      #
       # OAuth2 Username Mapping
       #export OAUTH2_USERNAME_MAP=
+      #
       # OAuth2 Fullname Mapping
       #export OAUTH2_FULLNAME_MAP=
+      #
       # OAuth2 Email Mapping
       #export OAUTH2_EMAIL_MAP=
       #---------------------------------------------
       # LDAP_ENABLE : Enable or not the connection by the LDAP
       # example :  export LDAP_ENABLE=true
       #export LDAP_ENABLE=false
+      #
       # LDAP_PORT : The port of the LDAP server
       # example :  export LDAP_PORT=389
       #export LDAP_PORT=389
+      #
       # LDAP_HOST : The host server for the LDAP server
       # example :  export LDAP_HOST=localhost
       #export LDAP_HOST=
+      #
+      #-----------------------------------------------------------------
+      # ==== LDAP AD Simple Auth ====
+      #
+      # Set to true, if you want to connect with Active Directory by Simple Authentication.
+      # When using AD Simple Auth, LDAP_BASEDN is not needed.
+      #
+      # Example:
+      #export LDAP_AD_SIMPLE_AUTH=true
+      #
+      # === LDAP User Authentication ===
+      #
+      # a) Option to login to the LDAP server with the user's own username and password, instead of
+      #    an administrator key. Default: false (use administrator key).
+      #
+      # b) When using AD Simple Auth, set to true, when login user is used for binding,
+      #    and LDAP_BASEDN is not needed.
+      #
+      # Example:
+      #export LDAP_USER_AUTHENTICATION=true
+      #
+      # Which field is used to find the user for the user authentication. Default: uid.
+      #export LDAP_USER_AUTHENTICATION_FIELD=uid
+      #
+      # === LDAP Default Domain ===
+      #
+      # a) In case AD SimpleAuth is configured, the default domain is appended to the given
+      #    loginname for creating the correct username for the bind request to AD.
+      #
+      # b) The default domain of the ldap it is used to create email if the field is not map
+      #     correctly with the LDAP_SYNC_USER_DATA_FIELDMAP
+      #
+      # Example :
+      #export LDAP_DEFAULT_DOMAIN=mydomain.com
+      #
+      #-----------------------------------------------------------------
+      # ==== LDAP BASEDN Auth ====
+      #
       # LDAP_BASEDN : The base DN for the LDAP Tree
       # example :  export LDAP_BASEDN=ou=user,dc=example,dc=org
       #export LDAP_BASEDN=
+      #
+      #---------------------------------------------
       # LDAP_LOGIN_FALLBACK : Fallback on the default authentication method
       # example :  export LDAP_LOGIN_FALLBACK=true
       #export LDAP_LOGIN_FALLBACK=false
+      #
       # LDAP_RECONNECT : Reconnect to the server if the connection is lost
       # example :  export LDAP_RECONNECT=false
       #export LDAP_RECONNECT=true
+      #
       # LDAP_TIMEOUT : Overall timeout, in milliseconds
       # example :  export LDAP_TIMEOUT=12345
       #export LDAP_TIMEOUT=10000
+      #
       # LDAP_IDLE_TIMEOUT : Specifies the timeout for idle LDAP connections in milliseconds
       # example :  export LDAP_IDLE_TIMEOUT=12345
       #export LDAP_IDLE_TIMEOUT=10000
+      #
       # LDAP_CONNECT_TIMEOUT : Connection timeout, in milliseconds
       # example :  export LDAP_CONNECT_TIMEOUT=12345
       #export LDAP_CONNECT_TIMEOUT=10000
+      #
       # LDAP_AUTHENTIFICATION : If the LDAP needs a user account to search
       # example :  export LDAP_AUTHENTIFICATION=true
       #export LDAP_AUTHENTIFICATION=false
+      #
       # LDAP_AUTHENTIFICATION_USERDN : The search user DN
       # example :  export LDAP_AUTHENTIFICATION_USERDN=cn=admin,dc=example,dc=org
       #----------------------------------------------------------------------------
@@ -238,110 +397,145 @@
       # LDAP_AUTHENTIFICATION_PASSWORD : The password for the search user
       # example : AUTHENTIFICATION_PASSWORD=admin
       #export LDAP_AUTHENTIFICATION_PASSWORD=
+      # LDAP_AUTHENTIFICATION_PASSWORD_FILE : The password file for the search user (Docker secrets)
+      # example : export LDAP_AUTHENTIFICATION_PASSWORD_FILE=/run/secrets/ldap_auth_password
+      #export LDAP_AUTHENTIFICATION_PASSWORD_FILE=
+      #
       # LDAP_LOG_ENABLED : Enable logs for the module
       # example :  export LDAP_LOG_ENABLED=true
       #export LDAP_LOG_ENABLED=false
+      #
       # LDAP_BACKGROUND_SYNC : If the sync of the users should be done in the background
       # example :  export LDAP_BACKGROUND_SYNC=true
       #export LDAP_BACKGROUND_SYNC=false
+      #
       # LDAP_BACKGROUND_SYNC_INTERVAL : At which interval does the background task sync in milliseconds
+      # The format must be as specified in:
+      # https://bunkat.github.io/later/parsers.html#text
+      #export LDAP_BACKGROUND_SYNC_INTERVAL=every 1 hours
       # At which interval does the background task sync in milliseconds.
       # Leave this unset, so it uses default, and does not crash.
       # https://github.com/wekan/wekan/issues/2354#issuecomment-515305722
       export LDAP_BACKGROUND_SYNC_INTERVAL=''
+      #
       # LDAP_BACKGROUND_SYNC_KEEP_EXISTANT_USERS_UPDATED :
       # example :  export LDAP_BACKGROUND_SYNC_KEEP_EXISTANT_USERS_UPDATED=true
       #export LDAP_BACKGROUND_SYNC_KEEP_EXISTANT_USERS_UPDATED=false
+      #
       # LDAP_BACKGROUND_SYNC_IMPORT_NEW_USERS :
       # example :  export LDAP_BACKGROUND_SYNC_IMPORT_NEW_USERS=true
       #export LDAP_BACKGROUND_SYNC_IMPORT_NEW_USERS=false
+      #
       # LDAP_ENCRYPTION : If using LDAPS
       # example :  export LDAP_ENCRYPTION=ssl
       #export LDAP_ENCRYPTION=false
+      #
       # LDAP_CA_CERT : The certification for the LDAPS server. Certificate needs to be included in this docker-compose.yml file.
       # example :  export LDAP_CA_CERT=-----BEGIN CERTIFICATE-----MIIE+zCCA+OgAwIBAgIkAhwR/6TVLmdRY6hHxvUFWc0+Enmu/Hu6cj+G2FIdAgIC...-----END CERTIFICATE-----
       #export LDAP_CA_CERT=
+      #
       # LDAP_REJECT_UNAUTHORIZED : Reject Unauthorized Certificate
       # example :  export LDAP_REJECT_UNAUTHORIZED=true
       #export LDAP_REJECT_UNAUTHORIZED=false
-      # Option to login to the LDAP server with the user's own username and password, instead of an administrator key. Default: false (use administrator key).
-      #export LDAP_USER_AUTHENTICATION=true
-      # Which field is used to find the user for the user authentication. Default: uid.
-      #export LDAP_USER_AUTHENTICATION_FIELD=uid
+      #
       # LDAP_USER_SEARCH_FILTER : Optional extra LDAP filters. Don't forget the outmost enclosing parentheses if needed
       # example :  export LDAP_USER_SEARCH_FILTER=
       #export LDAP_USER_SEARCH_FILTER=
+      #
       # LDAP_USER_SEARCH_SCOPE : base (search only in the provided DN), one (search only in the provided DN and one level deep), or sub (search the whole subtree)
       # example :  export LDAP_USER_SEARCH_SCOPE=one
       #export LDAP_USER_SEARCH_SCOPE=
+      #
       # LDAP_USER_SEARCH_FIELD : Which field is used to find the user
       # example :  export LDAP_USER_SEARCH_FIELD=uid
       #export LDAP_USER_SEARCH_FIELD=
+      #
       # LDAP_SEARCH_PAGE_SIZE : Used for pagination (0=unlimited)
       # example :  export LDAP_SEARCH_PAGE_SIZE=12345
       #export LDAP_SEARCH_PAGE_SIZE=0
+      #
       # LDAP_SEARCH_SIZE_LIMIT : The limit number of entries (0=unlimited)
       # example :  export LDAP_SEARCH_SIZE_LIMIT=12345
       #export LDAP_SEARCH_SIZE_LIMIT=0
+      #
       # LDAP_GROUP_FILTER_ENABLE : Enable group filtering
       # example :  export LDAP_GROUP_FILTER_ENABLE=true
       #export LDAP_GROUP_FILTER_ENABLE=false
+      #
       # LDAP_GROUP_FILTER_OBJECTCLASS : The object class for filtering
       # example :  export LDAP_GROUP_FILTER_OBJECTCLASS=group
       #export LDAP_GROUP_FILTER_OBJECTCLASS=
+      #
       # LDAP_GROUP_FILTER_GROUP_ID_ATTRIBUTE :
       # example :
       #export LDAP_GROUP_FILTER_GROUP_ID_ATTRIBUTE=
+      #
       # LDAP_GROUP_FILTER_GROUP_MEMBER_ATTRIBUTE :
       # example :
       #export LDAP_GROUP_FILTER_GROUP_MEMBER_ATTRIBUTE=
+      #
       # LDAP_GROUP_FILTER_GROUP_MEMBER_FORMAT :
       # example :
       #export LDAP_GROUP_FILTER_GROUP_MEMBER_FORMAT=
+      #
       # LDAP_GROUP_FILTER_GROUP_NAME :
       # example :
       #export LDAP_GROUP_FILTER_GROUP_NAME=
+      #
       # LDAP_UNIQUE_IDENTIFIER_FIELD : This field is sometimes class GUID (Globally Unique Identifier)
       # example :  export LDAP_UNIQUE_IDENTIFIER_FIELD=guid
       #export LDAP_UNIQUE_IDENTIFIER_FIELD=
+      #
       # LDAP_UTF8_NAMES_SLUGIFY : Convert the username to utf8
       # example :  export LDAP_UTF8_NAMES_SLUGIFY=false
       #export LDAP_UTF8_NAMES_SLUGIFY=true
+      #
       # LDAP_USERNAME_FIELD : Which field contains the ldap username
       # example :  export LDAP_USERNAME_FIELD=username
       #export LDAP_USERNAME_FIELD=
+      #
       # LDAP_FULLNAME_FIELD : Which field contains the ldap fullname
       # example :  export LDAP_FULLNAME_FIELD=fullname
       #export LDAP_FULLNAME_FIELD=
+      #
       # LDAP_MERGE_EXISTING_USERS :
       # example :  export LDAP_MERGE_EXISTING_USERS=true
       #export LDAP_MERGE_EXISTING_USERS=false
+      #
       # LDAP_EMAIL_MATCH_ENABLE : allow existing account matching by e-mail address when username does not match
       # example: LDAP_EMAIL_MATCH_ENABLE=true
       #export LDAP_EMAIL_MATCH_ENABLE=false
+      #
       # LDAP_EMAIL_MATCH_REQUIRE : require existing account matching by e-mail address when username does match
       # example: LDAP_EMAIL_MATCH_REQUIRE=true
       #export LDAP_EMAIL_MATCH_REQUIRE=false
+      #
       # LDAP_EMAIL_MATCH_VERIFIED : require existing account email address to be verified for matching
       # example: LDAP_EMAIL_MATCH_VERIFIED=true
       #export LDAP_EMAIL_MATCH_VERIFIED=false
+      #
       # LDAP_EMAIL_FIELD : which field contains the LDAP e-mail address
       # example: LDAP_EMAIL_FIELD=mail
       #export LDAP_EMAIL_FIELD=
+      #
       # LDAP_SYNC_USER_DATA :
       # example :  export LDAP_SYNC_USER_DATA=true
       #export LDAP_SYNC_USER_DATA=false
+      #
       # LDAP_SYNC_USER_DATA_FIELDMAP :
       # example :  export LDAP_SYNC_USER_DATA_FIELDMAP={"cn":"name", "mail":"email"}
       #export LDAP_SYNC_USER_DATA_FIELDMAP=
+      #
+      # The default domain of the ldap it is used to create email if the field is not map correctly
+      # with the LDAP_SYNC_USER_DATA_FIELDMAP is defined in setting LDAP_DEFAULT_DOMAIN above.
+      #
       # LDAP_SYNC_GROUP_ROLES :
       # example :
       #export LDAP_SYNC_GROUP_ROLES=
-      # LDAP_DEFAULT_DOMAIN : The default domain of the ldap it is used to create email if the field is not map correctly with the LDAP_SYNC_USER_DATA_FIELDMAP
-      # example :
-      #export LDAP_DEFAULT_DOMAIN=
+      #
       # Enable/Disable syncing of admin status based on ldap groups:
       #export LDAP_SYNC_ADMIN_STATUS=true
+      #
       # Comma separated list of admin group names to sync.
       #export LDAP_SYNC_ADMIN_GROUPS=group1,group2
       #---------------------------------------------------------------------
@@ -363,10 +557,40 @@
       # example : LOGOUT_ON_MINUTES=55
       #export LOGOUT_ON_MINUTES=
       #---------------------------------------------------------------------
-      # PASSWORD_LOGIN_ENABLED : Enable or not the password login form. 
+      # PASSWORD_LOGIN_ENABLED : Enable or not the password login form.
       #export PASSWORD_LOGIN_ENABLED=true
-
-      node main.js
+      #---------------------------------------------------------------------
+      #export CAS_ENABLED=true
+      #export CAS_BASE_URL=https://cas.example.com/cas
+      #export CAS_LOGIN_URL=https://cas.example.com/login
+      #export CAS_VALIDATE_URL=https://cas.example.com/cas/p3/serviceValidate
+      #---------------------------------------------------------------------
+      #export SAML_ENABLED=true
+      #export SAML_PROVIDER=
+      #export SAML_ENTRYPOINT=
+      #export SAML_ISSUER=
+      #export SAML_CERT=
+      #export SAML_IDPSLO_REDIRECTURL=
+      #export SAML_PRIVATE_KEYFILE=
+      #export SAML_PUBLIC_CERTFILE=
+      #export SAML_IDENTIFIER_FORMAT=
+      #export SAML_LOCAL_PROFILE_MATCH_ATTRIBUTE=
+      #export SAML_ATTRIBUTES=
+      #---------------------------------------------------------------------
+      # Wait spinner to use
+      #export WAIT_SPINNER=Bounce
+      #---------------------------------------------------------------------
+      # https://github.com/wekan/wekan/issues/3585#issuecomment-1021522132
+      # Add more Node heap:
+      #export NODE_OPTIONS="--max_old_space_size=4096"
+      # Add more stack:
+      #bash -c "ulimit -s 65500; exec node --stack-size=65500 --trace-deprecation main.js"
+      #bash -c "ulimit -s 65500; exec node --stack-size=65500 main.js"
+      #-------------------- OPTIONAL SETTINGS END ----------------------
+      #bash -c "ulimit -s 65500; exec node --stack-size=65500 --max-old-space-size=8192 main.js"
+      bash -c "ulimit -s 65500; exec node main.js"
+      #node main.js
+      #---------------------------------------------------------------------
       # & >> ../../wekan.log
       cd ../..
 #done

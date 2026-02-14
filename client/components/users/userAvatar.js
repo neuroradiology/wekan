@@ -1,48 +1,196 @@
+import { ReactiveCache } from '/imports/reactiveCache';
+import Cards from '/models/cards';
+import Avatars from '/models/avatars';
+import Users from '/models/users';
+import Org from '/models/org';
+import Team from '/models/team';
+
 Template.userAvatar.helpers({
   userData() {
-    // We need to handle a special case for the search results provided by the
-    // `matteodem:easy-search` package. Since these results gets published in a
-    // separate collection, and not in the standard Meteor.Users collection as
-    // expected, we use a component parameter ("property") to distinguish the
-    // two cases.
-    const userCollection = this.esSearch ? ESSearchResults : Users;
-    return userCollection.findOne(this.userId, {
+    const user = ReactiveCache.getUser(this.userId, {
       fields: {
         profile: 1,
         username: 1,
       },
     });
+    return user;
+  },
+
+  avatarUrl() {
+    const user = ReactiveCache.getUser(this.userId, { fields: { profile: 1 } });
+    const base = (user && user.profile && user.profile.avatarUrl) || '';
+    if (!base) return '';
+    // Append current boardId when available so public viewers can access avatars on public boards
+    try {
+      const boardId = Utils.getCurrentBoardId && Utils.getCurrentBoardId();
+      if (boardId) {
+        const sep = base.includes('?') ? '&' : '?';
+        return `${base}${sep}boardId=${encodeURIComponent(boardId)}`;
+      }
+    } catch (_) {}
+    return base;
   },
 
   memberType() {
-    const user = Users.findOne(this.userId);
-    return user && user.isBoardAdmin() ? 'admin' : 'normal';
+    const user = ReactiveCache.getUser(this.userId);
+    if (!user) return '';
+
+    const board = Utils.getCurrentBoard();
+    if (!board) return '';
+
+    // Return role in priority order: Admin, Normal, NormalAssignedOnly, NoComments, CommentOnly, CommentAssignedOnly, Worker, ReadOnly, ReadAssignedOnly
+    if (user.isBoardAdmin()) return 'admin';
+    if (board.hasReadAssignedOnly(user._id)) return 'read-assigned-only';
+    if (board.hasReadOnly(user._id)) return 'read-only';
+    if (board.hasWorker(user._id)) return 'worker';
+    if (board.hasCommentAssignedOnly(user._id)) return 'comment-assigned-only';
+    if (board.hasCommentOnly(user._id)) return 'comment-only';
+    if (board.hasNoComments(user._id)) return 'no-comments';
+    if (board.hasNormalAssignedOnly(user._id)) return 'normal-assigned-only';
+    return 'normal';
   },
 
+/*
   presenceStatusClassName() {
-    const user = Users.findOne(this.userId);
-    const userPresence = presences.findOne({ userId: this.userId });
+    const user = ReactiveCache.getUser(this.userId);
+    const userPresence = Presences.findOne({ userId: this.userId });
     if (user && user.isInvitedTo(Session.get('currentBoard'))) return 'pending';
     else if (!userPresence) return 'disconnected';
     else if (Session.equals('currentBoard', userPresence.state.currentBoardId))
       return 'active';
     else return 'idle';
   },
-});
+*/
 
-Template.userAvatar.events({
-  'click .js-change-avatar': Popup.open('changeAvatar'),
 });
 
 Template.userAvatarInitials.helpers({
   initials() {
-    const user = Users.findOne(this.userId);
+    const user = ReactiveCache.getUser(this.userId);
     return user && user.getInitials();
   },
 
   viewPortWidth() {
-    const user = Users.findOne(this.userId);
+    const user = ReactiveCache.getUser(this.userId);
     return ((user && user.getInitials().length) || 1) * 12;
+  },
+});
+
+BlazeComponent.extendComponent({
+  onCreated() {
+    this.error = new ReactiveVar('');
+    this.loading = new ReactiveVar(false);
+    this.findOrgsOptions = new ReactiveVar({});
+
+    this.page = new ReactiveVar(1);
+    this.autorun(() => {
+      const limitOrgs = this.page.get() * Number.MAX_SAFE_INTEGER;
+      this.subscribe('org', this.findOrgsOptions.get(), limitOrgs, () => {});
+    });
+  },
+
+  onRendered() {
+    this.setLoading(false);
+  },
+
+  setError(error) {
+    this.error.set(error);
+  },
+
+  setLoading(w) {
+    this.loading.set(w);
+  },
+
+  isLoading() {
+    return this.loading.get();
+  },
+
+  events() {
+    return [
+      {
+        'keyup input'() {
+          this.setError('');
+        },
+        'click .js-manage-board-removeOrg': Popup.open('removeBoardOrg'),
+      },
+    ];
+  },
+}).register('boardOrgRow');
+
+Template.boardOrgRow.helpers({
+  orgData() {
+    return ReactiveCache.getOrg(this.orgId);
+  },
+});
+
+Template.boardOrgName.helpers({
+  orgName() {
+    const org = ReactiveCache.getOrg(this.orgId);
+    return org && org.orgDisplayName;
+  },
+
+  orgViewPortWidth() {
+    const org = ReactiveCache.getOrg(this.orgId);
+    return ((org && org.orgDisplayName.length) || 1) * 12;
+  },
+});
+
+BlazeComponent.extendComponent({
+  onCreated() {
+    this.error = new ReactiveVar('');
+    this.loading = new ReactiveVar(false);
+    this.findOrgsOptions = new ReactiveVar({});
+
+    this.page = new ReactiveVar(1);
+    this.autorun(() => {
+      const limitTeams = this.page.get() * Number.MAX_SAFE_INTEGER;
+      this.subscribe('team', this.findOrgsOptions.get(), limitTeams, () => {});
+    });
+  },
+
+  onRendered() {
+    this.setLoading(false);
+  },
+
+  setError(error) {
+    this.error.set(error);
+  },
+
+  setLoading(w) {
+    this.loading.set(w);
+  },
+
+  isLoading() {
+    return this.loading.get();
+  },
+
+  events() {
+    return [
+      {
+        'keyup input'() {
+          this.setError('');
+        },
+        'click .js-manage-board-removeTeam': Popup.open('removeBoardTeam'),
+      },
+    ];
+  },
+}).register('boardTeamRow');
+
+Template.boardTeamRow.helpers({
+  teamData() {
+    return ReactiveCache.getTeam(this.teamId);
+  },
+});
+
+Template.boardTeamName.helpers({
+  teamName() {
+    const team = ReactiveCache.getTeam(this.teamId);
+    return team && team.teamDisplayName;
+  },
+
+  teamViewPortWidth() {
+    const team = ReactiveCache.getTeam(this.teamId);
+    return ((team && team.teamDisplayName.length) || 1) * 12;
   },
 });
 
@@ -53,32 +201,30 @@ BlazeComponent.extendComponent({
     Meteor.subscribe('my-avatars');
   },
 
-  avatarUrlOptions() {
-    return {
-      auth: false,
-      brokenIsFine: true,
-    };
-  },
-
   uploadedAvatars() {
-    return Avatars.find({ userId: Meteor.userId() });
+    const ret = ReactiveCache.getAvatars({ userId: Meteor.userId() }, {}, true);
+    return ret;
   },
 
   isSelected() {
-    const userProfile = Meteor.user().profile;
+    const userProfile = ReactiveCache.getCurrentUser().profile;
     const avatarUrl = userProfile && userProfile.avatarUrl;
-    const currentAvatarUrl = this.currentData().url(this.avatarUrlOptions());
+    const currentAvatarUrl = this.currentData().link();
     return avatarUrl === currentAvatarUrl;
   },
 
   noAvatarUrl() {
-    const userProfile = Meteor.user().profile;
+    const userProfile = ReactiveCache.getCurrentUser().profile;
     const avatarUrl = userProfile && userProfile.avatarUrl;
     return !avatarUrl;
   },
 
   setAvatar(avatarUrl) {
-    Meteor.user().setAvatarUrl(avatarUrl);
+    Meteor.call('setAvatarUrl', avatarUrl, (err) => {
+      if (err) {
+        this.setError(err.reason || 'Error setting avatar');
+      }
+    });
   },
 
   setError(error) {
@@ -92,77 +238,55 @@ BlazeComponent.extendComponent({
           this.$('.js-upload-avatar-input').click();
         },
         'change .js-upload-avatar-input'(event) {
-          let file, fileUrl;
-
-          FS.Utility.eachFile(event, f => {
-            try {
-              file = Avatars.insert(new FS.File(f));
-              fileUrl = file.url(this.avatarUrlOptions());
-            } catch (e) {
-              this.setError('avatar-too-big');
-            }
-          });
-
-          if (fileUrl) {
-            this.setError('');
-            const fetchAvatarInterval = window.setInterval(() => {
-              $.ajax({
-                url: fileUrl,
-                success: () => {
-                  this.setAvatar(file.url(this.avatarUrlOptions()));
-                  window.clearInterval(fetchAvatarInterval);
-                },
-              });
-            }, 100);
+          const self = this;
+          if (event.currentTarget.files && event.currentTarget.files[0]) {
+            const uploader = Avatars.insert(
+              {
+                file: event.currentTarget.files[0],
+                chunkSize: 'dynamic',
+              },
+              false,
+            );
+            uploader.on('error', (error, fileData) => {
+              self.setError(error.reason);
+            });
+            uploader.start();
           }
         },
-        'click .js-select-avatar'() {
-          const avatarUrl = this.currentData().url(this.avatarUrlOptions());
-          this.setAvatar(avatarUrl);
+        'click .js-select-avatar'(event) {
+          event.preventDefault();
+          event.stopPropagation();
+          const data = Blaze.getData(event.currentTarget);
+          if (data && typeof data.link === 'function') {
+            const avatarUrl = data.link();
+            this.setAvatar(avatarUrl);
+          }
         },
-        'click .js-select-initials'() {
+        'click .js-select-initials'(event) {
+          event.preventDefault();
+          event.stopPropagation();
           this.setAvatar('');
         },
-        'click .js-delete-avatar'() {
-          Avatars.remove(this.currentData()._id);
-        },
+        'click .js-delete-avatar': Popup.afterConfirm('deleteAvatar', function(event) {
+          Avatars.remove(this._id);
+          Popup.back();
+          event.stopPropagation();
+        }),
       },
     ];
   },
 }).register('changeAvatarPopup');
 
-Template.cardMembersPopup.helpers({
-  isCardMember() {
-    const card = Template.parentData();
-    const cardMembers = card.getMembers();
-
-    return _.contains(cardMembers, this.userId);
-  },
-
-  user() {
-    return Users.findOne(this.userId);
-  },
-});
-
-Template.cardMembersPopup.events({
-  'click .js-select-member'(event) {
-    const card = Cards.findOne(Session.get('currentCard'));
-    const memberId = this.userId;
-    card.toggleMember(memberId);
-    event.preventDefault();
-  },
-});
-
 Template.cardMemberPopup.helpers({
   user() {
-    return Users.findOne(this.userId);
+    return ReactiveCache.getUser(this.userId);
   },
 });
 
 Template.cardMemberPopup.events({
   'click .js-remove-member'() {
-    Cards.findOne(this.cardId).unassignMember(this.userId);
-    Popup.close();
+    ReactiveCache.getCard(this.cardId).unassignMember(this.userId);
+    Popup.back();
   },
   'click .js-edit-profile': Popup.open('editProfile'),
 });

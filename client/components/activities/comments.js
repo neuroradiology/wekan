@@ -1,8 +1,11 @@
+import { ReactiveCache } from '/imports/reactiveCache';
+
 const commentFormIsOpen = new ReactiveVar(false);
 
 BlazeComponent.extendComponent({
   onDestroyed() {
     commentFormIsOpen.set(false);
+    $('.note-popover').hide();
   },
 
   commentFormIsOpen() {
@@ -23,8 +26,10 @@ BlazeComponent.extendComponent({
           let boardId = card.boardId;
           let cardId = card._id;
           if (card.isLinkedCard()) {
-            boardId = Cards.findOne(card.linkedId).boardId;
+            boardId = ReactiveCache.getCard(card.linkedId).boardId;
             cardId = card.linkedId;
+          } else if (card.isLinkedBoard()) {
+            boardId = card.linkedId;
           }
           if (text) {
             CardComments.insert({
@@ -50,6 +55,42 @@ BlazeComponent.extendComponent({
   },
 }).register('commentForm');
 
+BlazeComponent.extendComponent({
+  getComments() {
+    const data = this.data();
+    if (!data || typeof data.comments !== 'function') return [];
+    return data.comments();
+  },
+}).register("comments");
+
+BlazeComponent.extendComponent({
+  events() {
+    return [
+      {
+        'click .js-delete-comment': Popup.afterConfirm('deleteComment', () => {
+          const commentId = this.data()._id;
+          CardComments.remove(commentId);
+          Popup.back();
+        }),
+        'submit .js-edit-comment'(evt) {
+          evt.preventDefault();
+          const commentText = this.currentComponent()
+            .getValue()
+            .trim();
+          const commentId = this.data()._id;
+          if (commentText) {
+            CardComments.update(commentId, {
+              $set: {
+                text: commentText,
+              },
+            });
+          }
+        },
+      },
+    ];
+  },
+}).register("comment");
+
 // XXX This should be a static method of the `commentForm` component
 function resetCommentInput(input) {
   input.val(''); // without manually trigger, input event won't be fired
@@ -63,7 +104,7 @@ function resetCommentInput(input) {
 // Tracker.autorun to register the component dependencies, and re-run when these
 // dependencies are invalidated. A better component API would remove this hack.
 Tracker.autorun(() => {
-  Session.get('currentCard');
+  Utils.getCurrentCardId();
   Tracker.afterFlush(() => {
     autosize.update($('.js-new-comment-input'));
   });
@@ -74,7 +115,7 @@ EscapeActions.register(
   () => {
     const draftKey = {
       fieldName: 'cardComment',
-      docId: Session.get('currentCard'),
+      docId: Utils.getCurrentCardId(),
     };
     const commentInput = $('.js-new-comment-input');
     const draft = commentInput.val().trim();

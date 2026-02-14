@@ -1,3 +1,7 @@
+import { ReactiveCache } from '/imports/reactiveCache';
+import { ALLOWED_COLORS } from '/config/const';
+import PositionHistory from './positionHistory';
+
 Swimlanes = new Mongo.Collection('swimlanes');
 
 /**
@@ -22,6 +26,13 @@ Swimlanes.attachSchema(
           return false;
         }
       },
+    },
+    archivedAt: {
+      /**
+       * latest archiving date of the swimlane
+       */
+      type: Date,
+      optional: true,
     },
     boardId: {
       /**
@@ -60,33 +71,8 @@ Swimlanes.attachSchema(
        */
       type: String,
       optional: true,
-      // silver is the default, so it is left out
-      allowedValues: [
-        'white',
-        'green',
-        'yellow',
-        'orange',
-        'red',
-        'purple',
-        'blue',
-        'sky',
-        'lime',
-        'pink',
-        'black',
-        'peachpuff',
-        'crimson',
-        'plum',
-        'darkgreen',
-        'slateblue',
-        'magenta',
-        'gold',
-        'navy',
-        'gray',
-        'saddlebrown',
-        'paleturquoise',
-        'mistyrose',
-        'indigo',
-      ],
+      // silver is the default
+      allowedValues: ALLOWED_COLORS,
     },
     updatedAt: {
       /**
@@ -122,24 +108,46 @@ Swimlanes.attachSchema(
       type: String,
       defaultValue: 'swimlane',
     },
+    height: {
+      /**
+       * The height of the swimlane in pixels.
+       * -1 = auto-height (default)
+       * 50-2000 = fixed height in pixels
+       */
+      type: Number,
+      optional: true,
+      defaultValue: -1,
+      custom() {
+        const h = this.value;
+        if (h !== -1 && (h < 50 || h > 2000)) {
+          return 'heightOutOfRange';
+        }
+      },
+    },
+    // NOTE: collapsed state is per-user only, stored in user profile.collapsedSwimlanes
+    // and localStorage for non-logged-in users
+    // NOTE: height is per-board (shared with all users), stored in swimlanes.height
   }),
 );
 
 Swimlanes.allow({
   insert(userId, doc) {
-    return allowIsBoardMemberCommentOnly(userId, Boards.findOne(doc.boardId));
+    // ReadOnly and CommentOnly users cannot create swimlanes
+    return allowIsBoardMemberWithWriteAccess(userId, ReactiveCache.getBoard(doc.boardId));
   },
   update(userId, doc) {
-    return allowIsBoardMemberCommentOnly(userId, Boards.findOne(doc.boardId));
+    // ReadOnly and CommentOnly users cannot edit swimlanes
+    return allowIsBoardMemberWithWriteAccess(userId, ReactiveCache.getBoard(doc.boardId));
   },
   remove(userId, doc) {
-    return allowIsBoardMemberCommentOnly(userId, Boards.findOne(doc.boardId));
+    // ReadOnly and CommentOnly users cannot delete swimlanes
+    return allowIsBoardMemberWithWriteAccess(userId, ReactiveCache.getBoard(doc.boardId));
   },
   fetch: ['boardId'],
 });
 
 Swimlanes.helpers({
-  copy(boardId) {
+  async copy(boardId) {
     const oldId = this._id;
     const oldBoardId = this.boardId;
     this.boardId = boardId;
@@ -155,68 +163,135 @@ Swimlanes.helpers({
     }
 
     // Copy all lists in swimlane
-    Lists.find(query).forEach(list => {
+    const lists = ReactiveCache.getLists(query);
+    for (const list of lists) {
       list.type = 'list';
       list.swimlaneId = oldId;
       list.boardId = boardId;
-      list.copy(boardId, _id);
+      await list.copy(boardId, _id);
+    }
+
+    return _id;
+  },
+
+  async move(toBoardId) {
+    for (const list of this.lists()) {
+      const toList = ReactiveCache.getList({
+        boardId: toBoardId,
+        title: list.title,
+        archived: false,
+      });
+
+      let toListId;
+      if (toList) {
+        toListId = toList._id;
+      } else {
+        toListId = await Lists.insertAsync({
+          title: list.title,
+          boardId: toBoardId,
+          type: list.type,
+          archived: false,
+          wipLimit: list.wipLimit,
+          swimlaneId: this._id,
+        });
+      }
+
+      const cards = ReactiveCache.getCards({
+        listId: list._id,
+        swimlaneId: this._id,
+      });
+      for (const card of cards) {
+        await card.move(toBoardId, this._id, toListId);
+      }
+    }
+
+    await Swimlanes.updateAsync(this._id, {
+      $set: {
+        boardId: toBoardId,
+      },
     });
+
+    // make sure there is a default swimlane
+    this.board().getDefaultSwimline();
   },
 
   cards() {
-    return Cards.find(
+    const ret = ReactiveCache.getCards(
       Filter.mongoSelector({
         swimlaneId: this._id,
         archived: false,
       }),
       { sort: ['sort'] },
     );
+    return ret;
   },
 
   lists() {
-    //currentUser = Meteor.user();
-    //if (currentUser) {
-    //  enabled = Meteor.user().hasSortBy();
-    //}
-    //return enabled ? this.newestLists() : this.draggableLists();
     return this.draggableLists();
   },
   newestLists() {
-    // sorted lists from newest to the oldest, by its creation date or its cards' last modification date
-    return Lists.find(
+    // Revert to shared lists across swimlanes: filter by board only
+    return ReactiveCache.getLists(
       {
         boardId: this.boardId,
-        swimlaneId: { $in: [this._id, ''] },
         archived: false,
       },
       { sort: { modifiedAt: -1 } },
     );
   },
   draggableLists() {
-    return Lists.find(
+    // Revert to shared lists across swimlanes: filter by board only
+    return ReactiveCache.getLists(
       {
         boardId: this.boardId,
-        swimlaneId: { $in: [this._id, ''] },
-        archived: false,
+        //archived: false,
       },
       { sort: ['sort'] },
     );
   },
 
   myLists() {
-    return Lists.find({ swimlaneId: this._id });
+    // Return per-swimlane lists: provide lists specific to this swimlane
+    return ReactiveCache.getLists(
+      {
+        boardId: this.boardId,
+        swimlaneId: this._id,
+        archived: false
+      },
+      { sort: ['sort'] },
+    );
   },
 
   allCards() {
-    return Cards.find({ swimlaneId: this._id });
+    const ret = ReactiveCache.getCards({ swimlaneId: this._id });
+    return ret;
+  },
+
+  isCollapsed() {
+    if (Meteor.isClient) {
+      const user = ReactiveCache.getCurrentUser();
+      if (user && user.getCollapsedSwimlaneFromStorage) {
+        const stored = user.getCollapsedSwimlaneFromStorage(this.boardId, this._id);
+        if (typeof stored === 'boolean') {
+          return stored;
+        }
+      }
+      if (!user && Users.getPublicCollapsedSwimlane) {
+        const stored = Users.getPublicCollapsedSwimlane(this.boardId, this._id);
+        if (typeof stored === 'boolean') {
+          return stored;
+        }
+      }
+    }
+    return this.collapsed === true;
   },
 
   board() {
-    return Boards.findOne(this.boardId);
+    return ReactiveCache.getBoard(this.boardId);
   },
 
   colorClass() {
-    if (this.color) return this.color;
+    if (this.color) return `swimlane-${this.color}`;
     return '';
   },
 
@@ -229,66 +304,81 @@ Swimlanes.helpers({
   },
 
   isListTemplatesSwimlane() {
-    const user = Users.findOne(Meteor.userId());
+    const user = ReactiveCache.getCurrentUser();
     return (user.profile || {}).listTemplatesSwimlaneId === this._id;
   },
 
   isCardTemplatesSwimlane() {
-    const user = Users.findOne(Meteor.userId());
+    const user = ReactiveCache.getCurrentUser();
     return (user.profile || {}).cardTemplatesSwimlaneId === this._id;
   },
 
   isBoardTemplatesSwimlane() {
-    const user = Users.findOne(Meteor.userId());
+    const user = ReactiveCache.getCurrentUser();
     return (user.profile || {}).boardTemplatesSwimlaneId === this._id;
   },
 
-  remove() {
-    Swimlanes.remove({ _id: this._id });
+  async remove() {
+    return await Swimlanes.removeAsync({ _id: this._id });
+  },
+
+  async rename(title) {
+    return await Swimlanes.updateAsync(this._id, { $set: { title } });
+  },
+
+  // NOTE: collapse() removed - collapsed state is per-user only
+  // Use user.setCollapsedSwimlane(boardId, swimlaneId, collapsed) instead
+
+  async archive() {
+    if (this.isTemplateSwimlane()) {
+      for (const list of this.myLists()) {
+        await list.archive();
+      }
+    }
+    return await Swimlanes.updateAsync(this._id, { $set: { archived: true, archivedAt: new Date() } });
+  },
+
+  async restore() {
+    if (this.isTemplateSwimlane()) {
+      for (const list of this.myLists()) {
+        await list.restore();
+      }
+    }
+    return await Swimlanes.updateAsync(this._id, { $set: { archived: false } });
+  },
+
+  async setColor(newColor) {
+    return await Swimlanes.updateAsync(this._id, { $set: { color: newColor } });
   },
 });
 
-Swimlanes.mutations({
-  rename(title) {
-    return { $set: { title } };
-  },
+Swimlanes.userArchivedSwimlanes = userId => {
+  return ReactiveCache.getSwimlanes({
+    boardId: { $in: Boards.userBoardIds(userId, null) },
+    archived: true,
+  })
+};
 
-  archive() {
-    if (this.isTemplateSwimlane()) {
-      this.myLists().forEach(list => {
-        return list.archive();
-      });
-    }
-    return { $set: { archived: true } };
-  },
+Swimlanes.userArchivedSwimlaneIds = () => {
+  return Swimlanes.userArchivedSwimlanes().map(swim => { return swim._id; });
+};
 
-  restore() {
-    if (this.isTemplateSwimlane()) {
-      this.myLists().forEach(list => {
-        return list.restore();
-      });
-    }
-    return { $set: { archived: false } };
-  },
+Swimlanes.archivedSwimlanes = () => {
+  return ReactiveCache.getSwimlanes({ archived: true });
+};
 
-  setColor(newColor) {
-    if (newColor === 'silver') {
-      newColor = null;
-    }
-    return {
-      $set: {
-        color: newColor,
-      },
-    };
-  },
-});
+Swimlanes.archivedSwimlaneIds = () => {
+  return Swimlanes.archivedSwimlanes().map(swim => {
+    return swim._id;
+  });
+};
 
 Swimlanes.hookOptions.after.update = { fetchPrevious: false };
 
 if (Meteor.isServer) {
-  Meteor.startup(() => {
-    Swimlanes._collection._ensureIndex({ modifiedAt: -1 });
-    Swimlanes._collection._ensureIndex({ boardId: 1 });
+  Meteor.startup(async () => {
+    await Swimlanes._collection.createIndexAsync({ modifiedAt: -1 });
+    await Swimlanes._collection.createIndexAsync({ boardId: 1 });
   });
 
   Swimlanes.after.insert((userId, doc) => {
@@ -299,10 +389,18 @@ if (Meteor.isServer) {
       boardId: doc.boardId,
       swimlaneId: doc._id,
     });
+
+    // Track original position for new swimlanes
+    Meteor.setTimeout(() => {
+      const swimlane = Swimlanes.findOne(doc._id);
+      if (swimlane) {
+        swimlane.trackOriginalPosition();
+      }
+    }, 100);
   });
 
   Swimlanes.before.remove(function(userId, doc) {
-    const lists = Lists.find(
+    const lists = ReactiveCache.getLists(
       {
         boardId: doc.boardId,
         swimlaneId: { $in: [doc._id, ''] },
@@ -311,7 +409,7 @@ if (Meteor.isServer) {
       { sort: ['sort'] },
     );
 
-    if (lists.count() < 2) {
+    if (lists.length < 2) {
       lists.forEach(list => {
         list.remove();
       });
@@ -329,14 +427,39 @@ if (Meteor.isServer) {
     });
   });
 
-  Swimlanes.after.update((userId, doc) => {
-    if (doc.archived) {
+  Swimlanes.after.update((userId, doc, fieldNames) => {
+    if (fieldNames.includes('title')) {
+      Activities.insert({
+        userId,
+        type: 'swimlane',
+        activityType: 'changedSwimlaneTitle',
+        listId: doc._id,
+        boardId: doc.boardId,
+        // this preserves the name so that the activity can be useful after the
+        // list is deleted
+        title: doc.title,
+      });
+    } else if (doc.archived)  {
       Activities.insert({
         userId,
         type: 'swimlane',
         activityType: 'archivedSwimlane',
-        swimlaneId: doc._id,
+        listId: doc._id,
         boardId: doc.boardId,
+        // this preserves the name so that the activity can be useful after the
+        // list is deleted
+        title: doc.title,
+      });
+    } else if (fieldNames.includes('archived'))  {
+      Activities.insert({
+        userId,
+        type: 'swimlane',
+        activityType: 'restoredSwimlane',
+        listId: doc._id,
+        boardId: doc.boardId,
+        // this preserves the name so that the activity can be useful after the
+        // list is deleted
+        title: doc.title,
       });
     }
   });
@@ -360,7 +483,7 @@ if (Meteor.isServer) {
 
       JsonRoutes.sendResult(res, {
         code: 200,
-        data: Swimlanes.find({ boardId: paramBoardId, archived: false }).map(
+        data: ReactiveCache.getSwimlanes({ boardId: paramBoardId, archived: false }).map(
           function(doc) {
             return {
               _id: doc._id,
@@ -394,9 +517,10 @@ if (Meteor.isServer) {
       const paramBoardId = req.params.boardId;
       const paramSwimlaneId = req.params.swimlaneId;
       Authentication.checkBoardAccess(req.userId, paramBoardId);
+
       JsonRoutes.sendResult(res, {
         code: 200,
-        data: Swimlanes.findOne({
+        data: ReactiveCache.getSwimlane({
           _id: paramSwimlaneId,
           boardId: paramBoardId,
           archived: false,
@@ -421,18 +545,60 @@ if (Meteor.isServer) {
    */
   JsonRoutes.add('POST', '/api/boards/:boardId/swimlanes', function(req, res) {
     try {
-      Authentication.checkUserId(req.userId);
       const paramBoardId = req.params.boardId;
-      const board = Boards.findOne(paramBoardId);
+      Authentication.checkBoardWriteAccess(req.userId, paramBoardId);
+
+      const board = ReactiveCache.getBoard(paramBoardId);
       const id = Swimlanes.insert({
         title: req.body.title,
         boardId: paramBoardId,
-        sort: board.swimlanes().count(),
+        sort: board.swimlanes().length,
       });
       JsonRoutes.sendResult(res, {
         code: 200,
         data: {
           _id: id,
+        },
+      });
+    } catch (error) {
+      JsonRoutes.sendResult(res, {
+        code: 200,
+        data: error,
+      });
+    }
+  });
+
+  /**
+   * @operation edit_swimlane
+   *
+   * @summary Edit the title of a swimlane
+   *
+   * @param {string} boardId the ID of the board
+   * @param {string} swimlaneId the ID of the swimlane to edit
+   * @param {string} title the new title of the swimlane
+   * @return_type {_id: string}
+   */
+  JsonRoutes.add('PUT', '/api/boards/:boardId/swimlanes/:swimlaneId', function(req, res) {
+    try {
+      const paramBoardId = req.params.boardId;
+      const paramSwimlaneId = req.params.swimlaneId;
+      Authentication.checkBoardWriteAccess(req.userId, paramBoardId);
+      const board = ReactiveCache.getBoard(paramBoardId);
+      const swimlane = ReactiveCache.getSwimlane({
+        _id: paramSwimlaneId,
+        boardId: paramBoardId,
+      });
+      if (!swimlane) {
+        throw new Meteor.Error('not-found', 'Swimlane not found');
+      }
+      Swimlanes.direct.update(
+        { _id: paramSwimlaneId },
+        { $set: { title: req.body.title } }
+      );
+      JsonRoutes.sendResult(res, {
+        code: 200,
+        data: {
+          _id: paramSwimlaneId,
         },
       });
     } catch (error) {
@@ -459,9 +625,9 @@ if (Meteor.isServer) {
     '/api/boards/:boardId/swimlanes/:swimlaneId',
     function(req, res) {
       try {
-        Authentication.checkUserId(req.userId);
         const paramBoardId = req.params.boardId;
         const paramSwimlaneId = req.params.swimlaneId;
+        Authentication.checkBoardWriteAccess(req.userId, paramBoardId);
         Swimlanes.remove({ _id: paramSwimlaneId, boardId: paramBoardId });
         JsonRoutes.sendResult(res, {
           code: 200,
@@ -478,5 +644,65 @@ if (Meteor.isServer) {
     },
   );
 }
+
+// Position history tracking methods
+Swimlanes.helpers({
+  /**
+   * Track the original position of this swimlane
+   */
+  trackOriginalPosition() {
+    const existingHistory = PositionHistory.findOne({
+      boardId: this.boardId,
+      entityType: 'swimlane',
+      entityId: this._id,
+    });
+
+    if (!existingHistory) {
+      PositionHistory.insert({
+        boardId: this.boardId,
+        entityType: 'swimlane',
+        entityId: this._id,
+        originalPosition: {
+          sort: this.sort,
+          title: this.title,
+        },
+        originalTitle: this.title,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    }
+  },
+
+  /**
+   * Get the original position history for this swimlane
+   */
+  getOriginalPosition() {
+    return PositionHistory.findOne({
+      boardId: this.boardId,
+      entityType: 'swimlane',
+      entityId: this._id,
+    });
+  },
+
+  /**
+   * Check if this swimlane has moved from its original position
+   */
+  hasMovedFromOriginalPosition() {
+    const history = this.getOriginalPosition();
+    if (!history) return false;
+
+    return history.originalPosition.sort !== this.sort;
+  },
+
+  /**
+   * Get a description of the original position
+   */
+  getOriginalPositionDescription() {
+    const history = this.getOriginalPosition();
+    if (!history) return 'No original position data';
+
+    return `Original position: ${history.originalPosition.sort || 0}`;
+  },
+});
 
 export default Swimlanes;

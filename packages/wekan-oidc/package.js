@@ -1,18 +1,19 @@
 Package.describe({
   summary: "OpenID Connect (OIDC) flow for Meteor",
-  version: "1.0.12",
+  version: "1.1.0",
   name: "wekan-oidc",
   git: "https://github.com/wekan/wekan-oidc.git",
 });
 
 Package.onUse(function(api) {
-  api.use('oauth2@1.1.0', ['client', 'server']);
-  api.use('oauth@1.1.0', ['client', 'server']);
-  api.use('http@1.1.0', ['server']);
-  api.use('underscore@1.0.0', 'client');
-  api.use('templating@1.1.0', 'client');
-  api.use('random@1.0.0', 'client');
-  api.use('service-configuration@1.0.0', ['client', 'server']);
+  api.use('oauth2', ['client', 'server']);
+  api.use('oauth', ['client', 'server']);
+  api.use('fetch', ['server']);
+  api.use('underscore', 'client');
+  api.use('ecmascript');
+  api.use('templating', 'client');
+  api.use('random', 'client');
+  api.use('service-configuration', ['client', 'server']);
 
   api.export('Oidc');
 

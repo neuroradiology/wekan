@@ -1,32 +1,86 @@
+import { ReactiveCache } from '/imports/reactiveCache';
+import { Blaze } from 'meteor/blaze';
+import { Session } from 'meteor/session';
+import { 
+  formatDateTime, 
+  formatDate, 
+  formatTime, 
+  getISOWeek, 
+  isValidDate, 
+  isBefore, 
+  isAfter, 
+  isSame, 
+  add, 
+  subtract, 
+  startOf, 
+  endOf, 
+  format, 
+  parseDate, 
+  now, 
+  createDate, 
+  fromNow, 
+  calendar 
+} from '/imports/lib/dateUtils';
+
 Blaze.registerHelper('currentBoard', () => {
-  const boardId = Session.get('currentBoard');
-  if (boardId) {
-    return Boards.findOne(boardId);
-  } else {
-    return null;
-  }
+  const ret = Utils.getCurrentBoard();
+  return ret;
 });
 
 Blaze.registerHelper('currentCard', () => {
-  const cardId = Session.get('currentCard');
-  if (cardId) {
-    return Cards.findOne(cardId);
-  } else {
-    return null;
-  }
+  const ret = Utils.getCurrentCard();
+  return ret;
 });
 
 Blaze.registerHelper('currentList', () => {
-  const listId = Session.get('currentList');
-  if (listId) {
-    return Lists.findOne(listId);
-  } else {
-    return null;
-  }
+  const ret = Utils.getCurrentList();
+  return ret;
 });
 
-Blaze.registerHelper('getUser', userId => Users.findOne(userId));
+Blaze.registerHelper('currentSetting', () => {
+  const ret = ReactiveCache.getCurrentSetting();
+  return ret;
+});
+
+Blaze.registerHelper('currentUser', () => {
+  const ret = ReactiveCache.getCurrentUser();
+  return ret;
+});
+
+Blaze.registerHelper('getUser', userId => ReactiveCache.getUser(userId));
 
 Blaze.registerHelper('concat', (...args) => args.slice(0, -1).join(''));
 
 Blaze.registerHelper('isMiniScreen', () => Utils.isMiniScreen());
+
+Blaze.registerHelper('isTouchScreen', () => Utils.isTouchScreen());
+
+Blaze.registerHelper('isShowDesktopDragHandles', () =>
+  Utils.isShowDesktopDragHandles(),
+);
+
+Blaze.registerHelper('isTouchScreenOrShowDesktopDragHandles', () =>
+  Utils.isTouchScreenOrShowDesktopDragHandles(),
+);
+
+Blaze.registerHelper('moment', (...args) => {
+  args.pop(); // hash
+  const [date, formatStr] = args;
+  return format(new Date(date), formatStr ?? 'LLLL');
+});
+
+Blaze.registerHelper('canModifyCard', () =>
+  Utils.canModifyCard(),
+);
+
+Blaze.registerHelper('canMoveCard', () =>
+  Utils.canMoveCard(),
+);
+
+Blaze.registerHelper('canModifyBoard', () =>
+  Utils.canModifyBoard(),
+);
+
+Blaze.registerHelper('add', (a, b) => a + b);
+
+Blaze.registerHelper('increment', (n) => (n || 0) + 1);

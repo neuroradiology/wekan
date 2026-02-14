@@ -1,3 +1,14 @@
+import { ReactiveCache } from '/imports/reactiveCache';
+import escapeForRegex from 'escape-string-regexp';
+import DOMPurify from 'dompurify';
+
+// Server-side text sanitization function
+function sanitizeText(text) {
+  if (typeof text !== 'string') return text;
+  // Strip HTML tags and return only text content
+  return text.replace(/<[^>]*>/g, '');
+}
+
 CardComments = new Mongo.Collection('card_comments');
 
 /**
@@ -71,13 +82,14 @@ CardComments.attachSchema(
 
 CardComments.allow({
   insert(userId, doc) {
-    return allowIsBoardMember(userId, Boards.findOne(doc.boardId));
+    // ReadOnly users cannot add comments. Only members who can comment are allowed.
+    return allowIsBoardMemberCommentOnly(userId, ReactiveCache.getBoard(doc.boardId));
   },
   update(userId, doc) {
-    return userId === doc.userId;
+    return userId === doc.userId || allowIsBoardAdmin(userId, ReactiveCache.getBoard(doc.boardId));
   },
   remove(userId, doc) {
-    return userId === doc.userId;
+    return userId === doc.userId || allowIsBoardAdmin(userId, ReactiveCache.getBoard(doc.boardId));
   },
   fetch: ['userId', 'boardId'],
 });
@@ -90,14 +102,60 @@ CardComments.helpers({
   },
 
   user() {
-    return Users.findOne(this.userId);
+    return ReactiveCache.getUser(this.userId);
   },
+
+  reactions() {
+    const cardCommentReactions = ReactiveCache.getCardCommentReaction({cardCommentId: this._id});
+    return !!cardCommentReactions ? cardCommentReactions.reactions : [];
+  },
+
+  toggleReaction(reactionCodepoint) {
+    if (reactionCodepoint !== sanitizeText(reactionCodepoint)) {
+      return false;
+    } else {
+
+      const cardCommentReactions = ReactiveCache.getCardCommentReaction({cardCommentId: this._id});
+      const reactions = !!cardCommentReactions ? cardCommentReactions.reactions : [];
+      const userId = Meteor.userId();
+      const reaction = reactions.find(r => r.reactionCodepoint === reactionCodepoint);
+
+      // If no reaction is set for the codepoint, add this
+      if (!reaction) {
+        reactions.push({ reactionCodepoint, userIds: [userId] });
+      } else {
+
+        // toggle user reaction upon previous reaction state
+        const userHasReacted = reaction.userIds.includes(userId);
+        if (userHasReacted) {
+          reaction.userIds.splice(reaction.userIds.indexOf(userId), 1);
+          if (reaction.userIds.length === 0) {
+            reactions.splice(reactions.indexOf(reaction), 1);
+          }
+        } else {
+          reaction.userIds.push(userId);
+        }
+      }
+
+      // If no reaction doc exists yet create otherwise update reaction set
+      if (!!cardCommentReactions) {
+        return CardCommentReactions.update({ _id: cardCommentReactions._id }, { $set: { reactions } });
+      } else {
+        return CardCommentReactions.insert({
+          boardId: this.boardId,
+          cardCommentId: this._id,
+          cardId: this.cardId,
+          reactions
+        });
+      }
+    }
+  }
 });
 
 CardComments.hookOptions.after.update = { fetchPrevious: false };
 
 function commentCreation(userId, doc) {
-  const card = Cards.findOne(doc.cardId);
+  const card = ReactiveCache.getCard(doc.cardId);
   Activities.insert({
     userId,
     activityType: 'addComment',
@@ -109,12 +167,34 @@ function commentCreation(userId, doc) {
   });
 }
 
+CardComments.textSearch = (userId, textArray) => {
+  const selector = {
+    boardId: { $in: Boards.userBoardIds(userId) },
+    $and: [],
+  };
+
+  for (const text of textArray) {
+    selector.$and.push({ text: new RegExp(escapeForRegex(text), 'i') });
+  }
+
+  // eslint-disable-next-line no-console
+  // console.log('cardComments selector:', selector);
+
+  const comments = ReactiveCache.getCardComments(selector);
+  // eslint-disable-next-line no-console
+  // console.log('count:', comments.count());
+  // eslint-disable-next-line no-console
+  // console.log('cards with comments:', comments.map(com => { return com.cardId }));
+
+  return comments;
+};
+
 if (Meteor.isServer) {
   // Comments are often fetched within a card, so we create an index to make these
   // queries more efficient.
-  Meteor.startup(() => {
-    CardComments._collection._ensureIndex({ modifiedAt: -1 });
-    CardComments._collection._ensureIndex({ cardId: 1, createdAt: -1 });
+  Meteor.startup(async () => {
+    await CardComments._collection.createIndexAsync({ modifiedAt: -1 });
+    await CardComments._collection.createIndexAsync({ cardId: 1, createdAt: -1 });
   });
 
   CardComments.after.insert((userId, doc) => {
@@ -122,7 +202,7 @@ if (Meteor.isServer) {
   });
 
   CardComments.after.update((userId, doc) => {
-    const card = Cards.findOne(doc.cardId);
+    const card = ReactiveCache.getCard(doc.cardId);
     Activities.insert({
       userId,
       activityType: 'editComment',
@@ -135,7 +215,7 @@ if (Meteor.isServer) {
   });
 
   CardComments.before.remove((userId, doc) => {
-    const card = Cards.findOne(doc.cardId);
+    const card = ReactiveCache.getCard(doc.cardId);
     Activities.insert({
       userId,
       activityType: 'deleteComment',
@@ -145,10 +225,7 @@ if (Meteor.isServer) {
       listId: card.listId,
       swimlaneId: card.swimlaneId,
     });
-  });
-
-  CardComments.after.remove((userId, doc) => {
-    const activity = Activities.findOne({ commentId: doc._id });
+    const activity = ReactiveCache.getActivity({ commentId: doc._id });
     if (activity) {
       Activities.remove(activity._id);
     }
@@ -167,20 +244,20 @@ if (Meteor.isServer) {
    *                comment: string,
    *                authorId: string}]
    */
-  JsonRoutes.add('GET', '/api/boards/:boardId/cards/:cardId/comments', function(
+  JsonRoutes.add('GET', '/api/boards/:boardId/cards/:cardId/comments', function (
     req,
     res,
   ) {
     try {
-      Authentication.checkUserId(req.userId);
       const paramBoardId = req.params.boardId;
       const paramCardId = req.params.cardId;
+      Authentication.checkBoardAccess(req.userId, paramBoardId);
       JsonRoutes.sendResult(res, {
         code: 200,
-        data: CardComments.find({
+        data: ReactiveCache.getCardComments({
           boardId: paramBoardId,
           cardId: paramCardId,
-        }).map(function(doc) {
+        }).map(function (doc) {
           return {
             _id: doc._id,
             comment: doc.text,
@@ -208,15 +285,15 @@ if (Meteor.isServer) {
   JsonRoutes.add(
     'GET',
     '/api/boards/:boardId/cards/:cardId/comments/:commentId',
-    function(req, res) {
+    function (req, res) {
       try {
-        Authentication.checkUserId(req.userId);
         const paramBoardId = req.params.boardId;
         const paramCommentId = req.params.commentId;
         const paramCardId = req.params.cardId;
+        Authentication.checkBoardAccess(req.userId, paramBoardId);
         JsonRoutes.sendResult(res, {
           code: 200,
-          data: CardComments.findOne({
+          data: ReactiveCache.getCardComment({
             _id: paramCommentId,
             cardId: paramCardId,
             boardId: paramBoardId,
@@ -237,20 +314,19 @@ if (Meteor.isServer) {
    *
    * @param {string} boardId the board ID of the card
    * @param {string} cardId the ID of the card
-   * @param {string} authorId the user who 'posted' the comment
-   * @param {string} text the content of the comment
+   * @param {string} comment the content of the comment
    * @return_type {_id: string}
    */
   JsonRoutes.add(
     'POST',
     '/api/boards/:boardId/cards/:cardId/comments',
-    function(req, res) {
+    function (req, res) {
       try {
-        Authentication.checkUserId(req.userId);
         const paramBoardId = req.params.boardId;
         const paramCardId = req.params.cardId;
+        Authentication.checkBoardAccess(req.userId, paramBoardId);
         const id = CardComments.direct.insert({
-          userId: req.body.authorId,
+          userId: req.userId,
           text: req.body.comment,
           cardId: paramCardId,
           boardId: paramBoardId,
@@ -263,12 +339,12 @@ if (Meteor.isServer) {
           },
         });
 
-        const cardComment = CardComments.findOne({
+        const cardComment = ReactiveCache.getCardComment({
           _id: id,
           cardId: paramCardId,
           boardId: paramBoardId,
         });
-        commentCreation(req.body.authorId, cardComment);
+        commentCreation(req.userId, cardComment);
       } catch (error) {
         JsonRoutes.sendResult(res, {
           code: 200,
@@ -290,12 +366,12 @@ if (Meteor.isServer) {
   JsonRoutes.add(
     'DELETE',
     '/api/boards/:boardId/cards/:cardId/comments/:commentId',
-    function(req, res) {
+    function (req, res) {
       try {
-        Authentication.checkUserId(req.userId);
         const paramBoardId = req.params.boardId;
         const paramCommentId = req.params.commentId;
         const paramCardId = req.params.cardId;
+        Authentication.checkBoardAccess(req.userId, paramBoardId);
         CardComments.remove({
           _id: paramCommentId,
           cardId: paramCardId,

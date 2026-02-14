@@ -1,14 +1,11 @@
 @ECHO OFF
 
-REM NOTE: You can try this to install Meteor on Windows, it works:
-REM       https://github.com/zodern/windows-meteor-installer/
-
-REM Installing Meteor with Chocolatey does not currently work.
-
-REM NOTE: THIS .BAT DOES NOT WORK !!
-REM Use instead this webpage instructions to build on Windows:
-REM https://github.com/wekan/wekan/wiki/Install-Wekan-from-source-on-Windows
+REM TODO: Test how to fix this
+REM Installing NPM on Windows: https://docs.npmjs.com/downloading-and-installing-node-js-and-npm
+REM Install meteor with: npm -g install meteor
+REM Old info: https://github.com/wekan/wekan/wiki/Install-Wekan-from-source-on-Windows
 REM Please add fix PRs, like config of MongoDB etc.
+
 
 md C:\repos
 cd C:\repos
@@ -16,21 +13,21 @@ cd C:\repos
 REM Install chocolatey
 @"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -InputFormat None -ExecutionPolicy Bypass -Command "iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))" && SET "PATH=%PATH%;%ALLUSERSPROFILE%\chocolatey\bin"
 
-choco install -y git curl python2 dotnet4.5.2 nano mongodb-3 mongoclient meteor
+choco install -y git curl python2 dotnet4.5.2 nano mongodb-4 mongoclient
 
-curl -O https://nodejs.org/dist/v12.16.2/node-v12.16.2-x64.msi
-call node-v12.16.2-x64.msi
+curl -O https://nodejs.org/dist/v14.21.3/node-v14.21.3-x64.msi
+call node-v14.21.3-x64.msi
 
 call npm config -g set msvs_version 2015
 call meteor npm config -g set msvs_version 2015
 
 call npm -g install npm
+call npm -g install meteor
 call npm -g install node-gyp
 call npm -g install fibers
 cd C:\repos
 git clone https://github.com/wekan/wekan.git
 cd wekan
-git checkout edge
 echo "Building Wekan."
 REM del /S /F /Q packages
 REM ## REPOS BELOW ARE INCLUDED TO WEKAN
@@ -52,7 +49,9 @@ REM del /S /F /Q node_modules
 call meteor npm install
 REM del /S /F /Q .build
 call meteor build .build --directory
-copy fix-download-unicode\cfs_access-point.txt .build\bundle\programs\server\packages\cfs_access-point.js
+REM ## Remove legacy webbroser bundle, so that Wekan works also at Android Firefox, iOS Safari, etc.
+del /S /F /Q rm .build/bundle/programs/web.browser.legacy
+REM ## Install some NPM packages
 cd .build\bundle\programs\server
 call meteor npm install
 REM cd C:\repos\wekan\.meteor\local\build\programs\server

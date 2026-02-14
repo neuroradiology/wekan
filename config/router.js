@@ -1,3 +1,6 @@
+import { TAPi18n } from '/imports/i18n';
+import { FlowRouter } from 'meteor/ostrio:flow-router-extra';
+
 let previousPath;
 FlowRouter.triggers.exit([
   ({ path }) => {
@@ -9,17 +12,25 @@ FlowRouter.route('/', {
   name: 'home',
   triggersEnter: [AccountsTemplates.ensureSignedIn],
   action() {
+    // Redirect to sign-in immediately if user is not logged in
+    if (!Meteor.userId()) {
+      FlowRouter.go('atSignIn');
+      return;
+    }
+
     Session.set('currentBoard', null);
     Session.set('currentList', null);
     Session.set('currentCard', null);
-
+    Session.set('popupCardId', null);
+    Session.set('popupCardBoardId', null);
     Filter.reset();
+    Session.set('sortBy', '');
     EscapeActions.executeAll();
 
     Utils.manageCustomUI();
     Utils.manageMatomo();
 
-    BlazeLayout.render('defaultLayout', {
+    this.render('defaultLayout', {
       headerBar: 'boardListHeaderBar',
       content: 'boardList',
     });
@@ -33,32 +44,149 @@ FlowRouter.route('/public', {
     Session.set('currentBoard', null);
     Session.set('currentList', null);
     Session.set('currentCard', null);
+    Session.set('popupCardId', null);
+    Session.set('popupCardBoardId', null);
 
     Filter.reset();
+    Session.set('sortBy', '');
     EscapeActions.executeAll();
 
     Utils.manageCustomUI();
     Utils.manageMatomo();
 
-    BlazeLayout.render('defaultLayout', {
+    this.render('defaultLayout', {
       headerBar: 'boardListHeaderBar',
       content: 'boardList',
     });
   },
 });
 
+FlowRouter.route('/accessibility', {
+  name: 'accessibility',
+  triggersEnter: [AccountsTemplates.ensureSignedIn],
+  action() {
+    Session.set('currentBoard', null);
+    Session.set('currentList', null);
+    Session.set('currentCard', null);
+    Session.set('popupCardId', null);
+    Session.set('popupCardBoardId', null);
+
+    Filter.reset();
+    Session.set('sortBy', '');
+    EscapeActions.executeAll();
+
+    Utils.manageCustomUI();
+    Utils.manageMatomo();
+
+    this.render('defaultLayout', {
+      headerBar: 'accessibilityHeaderBar',
+      content: 'accessibility',
+    });
+  },
+});
+
+FlowRouter.route('/support', {
+  name: 'support',
+  triggersEnter: [AccountsTemplates.ensureSignedIn],
+  action() {
+    Session.set('currentBoard', null);
+    Session.set('currentList', null);
+    Session.set('currentCard', null);
+    Session.set('popupCardId', null);
+    Session.set('popupCardBoardId', null);
+
+    Filter.reset();
+    Session.set('sortBy', '');
+    EscapeActions.executeAll();
+
+    Utils.manageCustomUI();
+    Utils.manageMatomo();
+
+    this.render('defaultLayout', {
+      headerBar: 'supportHeaderBar',
+      content: 'support',
+    });
+  },
+});
+
+FlowRouter.route('/public', {
+  name: 'public',
+  action() {
+    Session.set('currentBoard', null);
+    Session.set('currentList', null);
+    Session.set('currentCard', null);
+    Session.set('popupCardId', null);
+    Session.set('popupCardBoardId', null);
+
+    Filter.reset();
+    Session.set('sortBy', '');
+    EscapeActions.executeAll();
+
+    Utils.manageCustomUI();
+    Utils.manageMatomo();
+
+    this.render('defaultLayout', {
+      headerBar: 'supportHeaderBar',
+      content: 'support',
+    });
+  },
+});
+
+// Card route MUST be registered BEFORE board route so it matches first
+FlowRouter.route('/b/:boardId/:slug/:cardId', {
+  name: 'card',
+  action(params) {
+    Session.set('currentBoard', params.boardId);
+    Session.set('currentCard', params.cardId);
+    Session.set('popupCardId', null);
+    Session.set('popupCardBoardId', null);
+
+    // In desktop mode, add to openCards array to support multiple cards
+    const isMobile = Utils.getMobileMode();
+    if (!isMobile) {
+      const openCards = Session.get('openCards') || [];
+      if (!openCards.includes(params.cardId)) {
+        openCards.push(params.cardId);
+        Session.set('openCards', openCards);
+      }
+    }
+
+    Utils.manageCustomUI();
+    Utils.manageMatomo();
+
+    this.render('defaultLayout', {
+      headerBar: 'boardHeaderBar',
+      content: 'board',
+    });
+  },
+});
+
+
 FlowRouter.route('/b/:id/:slug', {
   name: 'board',
   action(params) {
+    const pathSegments = FlowRouter.current().path.split('/').filter(s => s);
+
+    // If we have 4+ segments (b, boardId, slug, cardId), this is a card view
+    if (pathSegments.length >= 4) {
+      return;
+    }
+    // If slug contains "/" it means a cardId was matched by this greedy pattern
+    if (params.slug && params.slug.includes('/')) {
+      return;
+    }
     const currentBoard = params.id;
     const previousBoard = Session.get('currentBoard');
     Session.set('currentBoard', currentBoard);
     Session.set('currentCard', null);
+    Session.set('popupCardId', null);
+    Session.set('popupCardBoardId', null);
 
     // If we close a card, we'll execute again this route action but we don't
     // want to excape every current actions (filters, etc.)
     if (previousBoard !== currentBoard) {
       Filter.reset();
+      Session.set('sortBy', '');
       EscapeActions.executeAll();
     } else {
       EscapeActions.executeUpTo('popup-close');
@@ -67,25 +195,7 @@ FlowRouter.route('/b/:id/:slug', {
     Utils.manageCustomUI();
     Utils.manageMatomo();
 
-    BlazeLayout.render('defaultLayout', {
-      headerBar: 'boardHeaderBar',
-      content: 'board',
-    });
-  },
-});
-
-FlowRouter.route('/b/:boardId/:slug/:cardId', {
-  name: 'card',
-  action(params) {
-    EscapeActions.executeUpTo('inlinedForm');
-
-    Session.set('currentBoard', params.boardId);
-    Session.set('currentCard', params.cardId);
-
-    Utils.manageCustomUI();
-    Utils.manageMatomo();
-
-    BlazeLayout.render('defaultLayout', {
+    this.render('defaultLayout', {
       headerBar: 'boardHeaderBar',
       content: 'board',
     });
@@ -105,11 +215,140 @@ FlowRouter.route('/shortcuts', {
         onCloseGoTo: previousPath,
       });
     } else {
-      BlazeLayout.render('defaultLayout', {
+      this.render('defaultLayout', {
         headerBar: 'shortcutsHeaderBar',
         content: shortcutsTemplate,
       });
     }
+  },
+});
+
+FlowRouter.route('/b/templates', {
+  name: 'template-container',
+  triggersEnter: [AccountsTemplates.ensureSignedIn],
+  action() {
+    Session.set('currentBoard', null);
+    Session.set('currentList', null);
+    Session.set('currentCard', null);
+    Session.set('popupCardId', null);
+    Session.set('popupCardBoardId', null);
+
+    Filter.reset();
+    Session.set('sortBy', '');
+    EscapeActions.executeAll();
+
+    Utils.manageCustomUI();
+    Utils.manageMatomo();
+
+    this.render('defaultLayout', {
+      headerBar: 'boardListHeaderBar',
+      content: 'boardList',
+    });
+  },
+});
+
+FlowRouter.route('/my-cards', {
+  name: 'my-cards',
+  triggersEnter: [AccountsTemplates.ensureSignedIn],
+  action() {
+    Filter.reset();
+    Session.set('sortBy', '');
+    // EscapeActions.executeAll();
+    EscapeActions.executeUpTo('popup-close');
+
+    Utils.manageCustomUI();
+    Utils.manageMatomo();
+
+    this.render('defaultLayout', {
+      headerBar: 'myCardsHeaderBar',
+      content: 'myCards',
+    });
+    // }
+  },
+});
+
+FlowRouter.route('/due-cards', {
+  name: 'due-cards',
+  triggersEnter: [AccountsTemplates.ensureSignedIn],
+  action() {
+    Filter.reset();
+    Session.set('sortBy', '');
+    // EscapeActions.executeAll();
+    EscapeActions.executeUpTo('popup-close');
+
+    Utils.manageCustomUI();
+    Utils.manageMatomo();
+
+    this.render('defaultLayout', {
+      headerBar: 'dueCardsHeaderBar',
+      content: 'dueCards',
+    });
+    // }
+  },
+});
+
+FlowRouter.route('/global-search', {
+  name: 'global-search',
+  triggersEnter: [AccountsTemplates.ensureSignedIn],
+  action() {
+    Filter.reset();
+    Session.set('sortBy', '');
+    // EscapeActions.executeAll();
+    EscapeActions.executeUpTo('popup-close');
+
+    Utils.manageCustomUI();
+    Utils.manageMatomo();
+    document.title = TAPi18n.__('globalSearch-title');
+
+    if (FlowRouter.getQueryParam('q')) {
+      Session.set(
+        'globalQuery',
+        decodeURIComponent(FlowRouter.getQueryParam('q')),
+      );
+    }
+    this.render('defaultLayout', {
+      headerBar: 'globalSearchHeaderBar',
+      content: 'globalSearch',
+    });
+  },
+});
+
+// Mobile Bookmarks page
+FlowRouter.route('/bookmarks', {
+  name: 'bookmarks',
+  triggersEnter: [AccountsTemplates.ensureSignedIn],
+  action() {
+    Filter.reset();
+    Session.set('sortBy', '');
+    EscapeActions.executeUpTo('popup-close');
+
+    Utils.manageCustomUI();
+    Utils.manageMatomo();
+
+    this.render('defaultLayout', {
+      headerBar: 'boardListHeaderBar',
+      content: 'boardList',
+    });
+  },
+});
+
+FlowRouter.route('/broken-cards', {
+  name: 'broken-cards',
+  action() {
+    const brokenCardsTemplate = 'brokenCards';
+
+    Filter.reset();
+    Session.set('sortBy', '');
+    // EscapeActions.executeAll();
+    EscapeActions.executeUpTo('popup-close');
+
+    Utils.manageCustomUI();
+    Utils.manageMatomo();
+
+    this.render('defaultLayout', {
+      headerBar: 'brokenCardsHeaderBar',
+      content: brokenCardsTemplate,
+    });
   },
 });
 
@@ -123,11 +362,14 @@ FlowRouter.route('/import/:source', {
     Session.set('currentBoard', null);
     Session.set('currentList', null);
     Session.set('currentCard', null);
+    Session.set('popupCardId', null);
+    Session.set('popupCardBoardId', null);
     Session.set('importSource', params.source);
 
     Filter.reset();
+    Session.set('sortBy', '');
     EscapeActions.executeAll();
-    BlazeLayout.render('defaultLayout', {
+    this.render('defaultLayout', {
       headerBar: 'importHeaderBar',
       content: 'import',
     });
@@ -142,14 +384,17 @@ FlowRouter.route('/setting', {
       Session.set('currentBoard', null);
       Session.set('currentList', null);
       Session.set('currentCard', null);
+      Session.set('popupCardId', null);
+      Session.set('popupCardBoardId', null);
 
       Filter.reset();
+      Session.set('sortBy', '');
       EscapeActions.executeAll();
     },
   ],
   action() {
     Utils.manageCustomUI();
-    BlazeLayout.render('defaultLayout', {
+    this.render('defaultLayout', {
       headerBar: 'settingHeaderBar',
       content: 'setting',
     });
@@ -164,13 +409,16 @@ FlowRouter.route('/information', {
       Session.set('currentBoard', null);
       Session.set('currentList', null);
       Session.set('currentCard', null);
+      Session.set('popupCardId', null);
+      Session.set('popupCardBoardId', null);
 
       Filter.reset();
+      Session.set('sortBy', '');
       EscapeActions.executeAll();
     },
   ],
   action() {
-    BlazeLayout.render('defaultLayout', {
+    this.render('defaultLayout', {
       headerBar: 'settingHeaderBar',
       content: 'information',
     });
@@ -185,24 +433,99 @@ FlowRouter.route('/people', {
       Session.set('currentBoard', null);
       Session.set('currentList', null);
       Session.set('currentCard', null);
+      Session.set('popupCardId', null);
+      Session.set('popupCardBoardId', null);
 
       Filter.reset();
+      Session.set('sortBy', '');
       EscapeActions.executeAll();
     },
   ],
   action() {
-    BlazeLayout.render('defaultLayout', {
+    this.render('defaultLayout', {
       headerBar: 'settingHeaderBar',
       content: 'people',
     });
   },
 });
 
-FlowRouter.notFound = {
+FlowRouter.route('/admin-reports', {
+  name: 'admin-reports',
+  triggersEnter: [
+    AccountsTemplates.ensureSignedIn,
+    () => {
+      Session.set('currentBoard', null);
+      Session.set('currentList', null);
+      Session.set('currentCard', null);
+      Session.set('popupCardId', null);
+      Session.set('popupCardBoardId', null);
+
+      Filter.reset();
+      Session.set('sortBy', '');
+      EscapeActions.executeAll();
+    },
+  ],
   action() {
-    BlazeLayout.render('defaultLayout', { content: 'notFound' });
+    this.render('defaultLayout', {
+      headerBar: 'settingHeaderBar',
+      content: 'adminReports',
+    });
   },
-};
+});
+
+FlowRouter.route('/attachments', {
+  name: 'attachments',
+  triggersEnter: [
+    AccountsTemplates.ensureSignedIn,
+    () => {
+      Session.set('currentBoard', null);
+      Session.set('currentList', null);
+      Session.set('currentCard', null);
+      Session.set('popupCardId', null);
+      Session.set('popupCardBoardId', null);
+
+      Filter.reset();
+      Session.set('sortBy', '');
+      EscapeActions.executeAll();
+    },
+  ],
+  action() {
+    this.render('defaultLayout', {
+      headerBar: 'settingHeaderBar',
+      content: 'attachments',
+    });
+  },
+});
+
+FlowRouter.route('/translation', {
+  name: 'translation',
+  triggersEnter: [
+    AccountsTemplates.ensureSignedIn,
+    () => {
+      Session.set('currentBoard', null);
+      Session.set('currentList', null);
+      Session.set('currentCard', null);
+      Session.set('popupCardId', null);
+      Session.set('popupCardBoardId', null);
+
+      Filter.reset();
+      Session.set('sortBy', '');
+      EscapeActions.executeAll();
+    },
+  ],
+  action() {
+    this.render('defaultLayout', {
+      headerBar: 'settingHeaderBar',
+      content: 'translation',
+    });
+  },
+});
+
+FlowRouter.route('*', {
+  action() {
+    this.render('defaultLayout', { content: 'notFound' });
+  },
+});
 
 // We maintain a list of redirections to ensure that we don't break old URLs
 // when we change our routing scheme.
@@ -238,7 +561,7 @@ _.each(redirections, (newPath, oldPath) => {
 //Meteor.isClient && Meteor.startup(() => {
 //  Tracker.autorun(() => {
 
-//    const currentBoard = Boards.findOne(Session.get('currentBoard'));
+//    const currentBoard = Utils.getCurrentBoard();
 //    const titleStack = [appTitle];
 //    if (currentBoard) {
 //      titleStack.push(currentBoard.title);

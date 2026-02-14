@@ -1,6 +1,17 @@
+import { ReactiveCache } from '/imports/reactiveCache';
+
 BlazeComponent.extendComponent({
   onCreated() {
     this.currentActions = new ReactiveVar('board');
+  },
+
+  ruleNameStr() {
+    const rn = this.data() && this.data().ruleName;
+    try {
+      return rn && typeof rn.get === 'function' ? rn.get() : '';
+    } catch (_) {
+      return '';
+    }
   },
 
   setBoardActions() {
@@ -33,7 +44,8 @@ BlazeComponent.extendComponent({
   },
 
   rules() {
-    return Rules.find({});
+    const ret = ReactiveCache.getRules({});
+    return ret;
   },
 
   name() {

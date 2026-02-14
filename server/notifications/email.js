@@ -1,3 +1,9 @@
+import { ReactiveCache } from '/imports/reactiveCache';
+import { TAPi18n } from '/imports/i18n';
+//var nodemailer = require('nodemailer');
+
+import EmailLocalization from '../lib/emailLocalization';
+
 // buffer each user's email text in a queue, then flush them in single email
 Meteor.startup(() => {
   Notifications.subscribe('email', (user, title, description, params) => {
@@ -10,6 +16,7 @@ Meteor.startup(() => {
       quoteParams[key] = quoteParams[key] ? `${params[key]}` : '';
     });
 
+    // Get user's preferred language
     const lan = user.getLanguage();
     const subject = TAPi18n.__(title, params, lan); // the original function has a fault, i believe the title should be used according to original author
     const existing = user.getEmailBuffer().length > 0;
@@ -27,7 +34,7 @@ Meteor.startup(() => {
     // so we pass userId with closure
     const userId = user._id;
     Meteor.setTimeout(() => {
-      const user = Users.findOne(userId);
+      const user = ReactiveCache.getUser(userId);
 
       // for each user, in the timed period, only the first call will get the cached content,
       // other calls will get nothing
@@ -38,11 +45,14 @@ Meteor.startup(() => {
       const html = texts.join('<br/>\n\n');
       user.clearEmailBuffer();
       try {
-        Email.send({
+        // Use EmailLocalization utility to ensure the correct language is used
+        EmailLocalization.sendEmail({
           to: user.emails[0].address.toLowerCase(),
           from: Accounts.emailTemplates.from,
           subject,
           html,
+          language: user.getLanguage(),
+          userId: user._id
         });
       } catch (e) {
         return;

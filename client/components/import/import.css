@@ -1,0 +1,51 @@
+.map-members:after {
+  content: "";
+  flex: auto;
+}
+.map-members .mapping-list {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 0 -0.5vw;
+}
+.map-members .mapping-list .mapping-item {
+  max-width: min(300px, 40vw);
+  min-width: min(200px, 26vw);
+  padding: 0.8vh 0.8vw;
+  margin: 0.7vh;
+  flex: 1;
+  background: #fff;
+  border-radius: 0.4vw;
+  box-shadow: 0 0.2vh 0.3vh rgba(0,0,0,0.15);
+}
+.map-members .mapping-list .mapping-item:hover {
+  background: #f2f2f2;
+}
+.map-members .mapping-list .mapping-item.filled {
+  background: #e0ffe5;
+}
+.map-members .mapping-list .mapping-item.filled:hover {
+  background: #ffe0e0;
+}
+.map-members .mapping-list .mapping-item.ghost-item {
+  height: 0;
+  visibility: hidden;
+  border: none;
+}
+.map-members .mapping-list .profile-source {
+  display: inline-block;
+  width: 80%;
+}
+.map-members .mapping-list .wekan {
+  display: inline-block;
+  width: 4.5vw;
+}
+.map-members .mapping-list .wekan .member {
+  float: none;
+}
+a.show-mapping {
+  text-decoration: underline;
+}
+.import-members-map-note {
+  font-size: 90%;
+  font-weight: bold;
+}

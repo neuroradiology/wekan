@@ -1,3 +1,4 @@
+import { ReactiveCache } from '/imports/reactiveCache';
 import { Meteor } from 'meteor/meteor';
 
 Rules = new Mongo.Collection('rules');
@@ -49,36 +50,42 @@ Rules.attachSchema(
   }),
 );
 
-Rules.mutations({
-  rename(description) {
-    return { $set: { description } };
-  },
-});
-
 Rules.helpers({
+  async rename(description) {
+    return await Rules.updateAsync(this._id, { $set: { description } });
+  },
   getAction() {
-    return Actions.findOne({ _id: this.actionId });
+    return ReactiveCache.getAction(this.actionId);
   },
   getTrigger() {
-    return Triggers.findOne({ _id: this.triggerId });
+    return ReactiveCache.getTrigger(this.triggerId);
+  },
+  board() {
+    return ReactiveCache.getBoard(this.boardId);
+  },
+  trigger() {
+    return ReactiveCache.getTrigger(this.triggerId);
+  },
+  action() {
+    return ReactiveCache.getAction(this.actionId);
   },
 });
 
 Rules.allow({
   insert(userId, doc) {
-    return allowIsBoardAdmin(userId, Boards.findOne(doc.boardId));
+    return allowIsBoardAdmin(userId, ReactiveCache.getBoard(doc.boardId));
   },
   update(userId, doc) {
-    return allowIsBoardAdmin(userId, Boards.findOne(doc.boardId));
+    return allowIsBoardAdmin(userId, ReactiveCache.getBoard(doc.boardId));
   },
   remove(userId, doc) {
-    return allowIsBoardAdmin(userId, Boards.findOne(doc.boardId));
+    return allowIsBoardAdmin(userId, ReactiveCache.getBoard(doc.boardId));
   },
 });
 
 if (Meteor.isServer) {
-  Meteor.startup(() => {
-    Rules._collection._ensureIndex({ modifiedAt: -1 });
+  Meteor.startup(async () => {
+    await Rules._collection.createIndexAsync({ modifiedAt: -1 });
   });
 }
 

@@ -1,9 +1,8 @@
 "use strict";
 
-const Fiber = Npm.require('fibers');
-const https = Npm.require('https');
-const url = Npm.require('url');
-const xmlParser = Npm.require('xml2js');
+import https from 'https';
+import url from 'url';
+import xml2js from 'xml2js';
 
 // Library
 class CAS {
@@ -61,7 +60,7 @@ class CAS {
           console.log(error);
           callback(undefined, false);
         } else {
-          xmlParser.parseString(response, (err, result) => {
+          xml2js.parseString(response, (err, result) => {
             if (err) {
               console.log('Bad response format.');
               callback({message: 'Bad response format. XML could not parse it'});
@@ -71,14 +70,37 @@ class CAS {
                 callback({message: 'Empty response.'});
               }
               if (result['cas:serviceResponse']['cas:authenticationSuccess']) {
-                var userData = {
+                const userData = {
                   id: result['cas:serviceResponse']['cas:authenticationSuccess'][0]['cas:user'][0].toLowerCase(),
-                }
-                const attributes = result['cas:serviceResponse']['cas:authenticationSuccess'][0]['cas:attributes'][0];
-                for (var fieldName in attributes) {
-                  userData[fieldName] = attributes[fieldName][0];
                 };
-                callback(undefined, true, userData);
+                const attributes = result['cas:serviceResponse']['cas:authenticationSuccess'][0]['cas:attributes'][0];
+
+                // Check allowed ldap groups if exist (array only)
+                // example cas settings : "allowedLdapGroups" : ["wekan", "admin"],
+                let findedGroup = false;
+                const allowedLdapGroups = Meteor.settings.cas.allowedLdapGroups || false;
+                for (const fieldName in attributes) {
+                  if (allowedLdapGroups && fieldName === 'cas:memberOf') {
+                    for (const groups in attributes[fieldName]) {
+                      const str = attributes[fieldName][groups];
+                      if (!Array.isArray(allowedLdapGroups)) {
+                        callback({message: 'Settings "allowedLdapGroups" must be an array'});
+                      }
+                      for (const allowedLdapGroup in allowedLdapGroups) {
+                        if (str.search(`cn=${allowedLdapGroups[allowedLdapGroup]}`) >= 0) {
+                          findedGroup = true;
+                        }
+                      }
+                    }
+                  }
+                  userData[fieldName] = attributes[fieldName][0];
+                }
+
+                if (allowedLdapGroups && !findedGroup) {
+                  callback({message: 'Group not finded.'}, false);
+                } else {
+                  callback(undefined, true, userData);
+                }
               } else {
                 callback(undefined, false);
               }
@@ -97,20 +119,16 @@ let _userData = {};
 //RoutePolicy.declare('/_cas/', 'network');
 
 // Listen to incoming OAuth http requests
-WebApp.connectHandlers.use((req, res, next) => {
-  // Need to create a Fiber since we're using synchronous http calls and nothing
-  // else is wrapping this in a fiber automatically
-
-  Fiber(() => {
-    middleware(req, res, next);
-  }).run();
-});
+WebApp.connectHandlers.use(Meteor.bindEnvironment((req, res, next) => {
+  middleware(req, res, next);
+}));
 
 const middleware = (req, res, next) => {
   // Make sure to catch any exceptions because otherwise we'd crash
   // the runner
+  let redirectUrl;
   try {
-    urlParsed = url.parse(req.url, true);
+    const urlParsed = url.parse(req.url, true);
 
     // Getting the ticket (if it's defined in GET-params)
     // If no ticket, then request will continue down the default
@@ -127,7 +145,7 @@ const middleware = (req, res, next) => {
     }
 
     const serviceUrl = Meteor.absoluteUrl(urlParsed.href.replace(/^\//g, '')).replace(/([&?])ticket=[^&]+[&]?/g, '$1').replace(/[?&]+$/g, '');
-    const redirectUrl = serviceUrl;//.replace(/([&?])casToken=[^&]+[&]?/g, '$1').replace(/[?&]+$/g, '');
+    redirectUrl = serviceUrl;//.replace(/([&?])casToken=[^&]+[&]?/g, '$1').replace(/[?&]+$/g, '');
 
     // get auth token
     const credentialToken = query.casToken;
@@ -183,7 +201,7 @@ const casValidate = (req, ticket, token, service, callback) => {
  * Register a server-side login handle.
  * It is call after Accounts.callLoginMethod() is call from client.
  */
- Accounts.registerLoginHandler((options) => {
+ Accounts.registerLoginHandler(async (options) => {
   if (!options.cas)
     return undefined;
 
@@ -229,13 +247,13 @@ const casValidate = (req, ticket, token, service, callback) => {
   if (attrs.debug) {
     console.log(`CAS response : ${JSON.stringify(result)}`);
   }
-  let user = Meteor.users.findOne({ 'username': options.username });
+  let user = await Meteor.users.findOneAsync({ 'username': options.username });
   if (! user) {
     if (attrs.debug) {
       console.log(`Creating user account ${JSON.stringify(options)}`);
     }
-    const userId = Accounts.insertUserDoc({}, options);
-    user = Meteor.users.findOne(userId);
+    const userId = await Accounts.insertUserDoc({}, options);
+    user = await Meteor.users.findOneAsync(userId);
   }
   if (attrs.debug) {
     console.log(`Using user account ${JSON.stringify(user)}`);
@@ -244,7 +262,7 @@ const casValidate = (req, ticket, token, service, callback) => {
 });
 
 const _hasCredential = (credentialToken) => {
-  return _.has(_casCredentialTokens, credentialToken);
+  return Object.prototype.hasOwnProperty.call(_casCredentialTokens, credentialToken);
 }
 
 /*

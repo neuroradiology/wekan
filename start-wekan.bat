@@ -1,9 +1,43 @@
-REM ------------------------------------------------------------
+@ECHO OFF
 
-REM NOTE: THIS .BAT DOES NOT WORK !!
-REM Use instead this webpage instructions to build on Windows:
-REM https://github.com/wekan/wekan/wiki/Install-Wekan-from-source-on-Windows
-REM Please add fix PRs, like config of MongoDB etc.
+REM # ------------------- HOWTO ---------------------
+REM # https://github.com/wekan/wekan/wiki/Offline
+
+REM #-------------------- REQUIRED SETTINGS START --------------------
+
+REM # Writable path required to exist and be writable for attachments to migrate and work correctly
+SET WRITABLE_PATH=..
+
+REM # MongoDB database URL required
+SET MONGO_URL=mongodb://127.0.0.1:27017/wekan
+REM # MONGO_PASSWORD_FILE : MongoDB password file (Docker secrets)
+REM # example : SET MONGO_PASSWORD_FILE=/run/secrets/mongo_password
+REM SET MONGO_PASSWORD_FILE=
+
+REM # MONGO_OPLOG_URL: MongoDB oplog connection (highly recommended for pub/sub performance)
+REM # Required for Meteor reactive subscriptions to work efficiently
+REM # Must point to a MongoDB replica set (local oplog or remote)
+REM # For local MongoDB with replicaSet named 'rs0', use:
+REM #   SET MONGO_OPLOG_URL=mongodb://127.0.0.1:27017/local?replicaSet=rs0
+REM # For production with credentials and remote MongoDB:
+REM #   SET MONGO_OPLOG_URL=mongodb://<user>:<password>@<host>:<port>/local?authSource=admin&replicaSet=rsWekan
+REM # Without this, Meteor falls back to polling which increases CPU usage and latency
+REM SET MONGO_OPLOG_URL=mongodb://127.0.0.1:27017/local?replicaSet=rs0
+
+REM # If port is 80, must change ROOT_URL to: http://YOUR-WEKAN-SERVER-IPv4-ADDRESS , like http://192.168.0.100
+REM # If port is not 80, must change ROOT_URL to: http://YOUR-WEKAN-SERVER-IPv4-ADDRESS:YOUR-PORT-NUMBER , like http://192.168.0.100:2000
+REM # If ROOT_URL is not correct, these do not work: translations, uploading attachments.
+SET ROOT_URL=http://localhost
+
+REM # Must change to YOUR-PORT-NUMBER:
+SET PORT=80
+
+REM #------------------- REQUIRED SETTINGS END ----------------------
+
+REM #-------------------- OPTIONAL SETTINGS START -------------------
+REM # If at public Internet, required different settings:
+REM # - For ROOT_URL: https://github.com/wekan/wekan/wiki/Settings
+REM # - For SSL/TLS, also at above wiki right menu: config for Caddy/Nginx/Apache
 
 REM ------------------------------------------------------------
 
@@ -12,23 +46,41 @@ REM SET DEBUG=true
 
 REM ------------------------------------------------------------
 
-SET MONGO_URL=mongodb://127.0.0.1:27017/wekan
-SET ROOT_URL=http://127.0.0.1:2000/
-SET MAIL_URL=smtp://user:pass@mailserver.example.com:25/
-SET MAIL_FROM=admin@example.com
-SET PORT=2000
+REM # ==== AWS S3 FOR FILES ====
+REM # Any region. For example:
+REM #   us-standard,us-west-1,us-west-2,
+REM #   eu-west-1,eu-central-1,
+REM #   ap-southeast-1,ap-northeast-1,sa-east-1
+REM #
+REM SET S3='{"s3":{"key": "xxx", "secret": "xxx", "bucket": "xxx", "region": "eu-west-1"}}'
+REM # S3_SECRET_FILE : S3 secret file (Docker secrets)
+REM # example : SET S3_SECRET_FILE=/run/secrets/s3_secret
+REM SET S3_SECRET_FILE=
+
+REM # https://github.com/wekan/wekan/wiki/Troubleshooting-Mail
+REM SET MAIL_URL=smtps://username:password@email-smtp.eu-west-1.amazonaws.com:587/
+REM SET MAIL_FROM="Wekan Boards <info@example.com>"
+REM # Currently MAIL_SERVICE is not in use.
+REM SET MAIL_SERVICE=Outlook365
+REM SET MAIL_SERVICE_USER=firstname.lastname@hotmail.com
+REM SET MAIL_SERVICE_PASSWORD=SecretPassword
+REM # MAIL_SERVICE_PASSWORD_FILE : Password file for mail service (Docker secrets)
+REM # example : SET MAIL_SERVICE_PASSWORD_FILE=/run/secrets/mail_service_password
+REM SET MAIL_SERVICE_PASSWORD_FILE=
+
+REM # ==== NUMBER OF SEARCH RESULTS PER PAGE BY DEFAULT ====
+REM SET RESULTS_PER_PAGE=20
 
 REM # If you disable Wekan API with false, Export Board does not work.
 SET WITH_API=true
 
+REM # ==== AFTER OIDC LOGIN, ADD USERS AUTOMATICALLY TO THIS BOARD ID ====
+REM # https://github.com/wekan/wekan/pull/5098
+REM SET DEFAULT_BOARD_ID=abcd1234
+
 REM # ==== RICH TEXT EDITOR IN CARD COMMENTS ====
 REM # https://github.com/wekan/wekan/pull/2560
 SET RICHER_CARD_COMMENT_EDITOR=false
-
-REM # ==== MOUSE SCROLL ====
-REM # https://github.com/wekan/wekan/issues/2949
-SET SCROLLINERTIA=0
-SET SCROLLAMOUNT=auto
 
 REM # ==== CARD OPENED, SEND WEBHOOK MESSAGE ====
 SET CARD_OPENED_WEBHOOK_ENABLED=false
@@ -47,6 +99,19 @@ REM SET ACCOUNTS_LOCKOUT_KNOWN_USERS_FAILURE_WINDOW=15
 REM SET ACCOUNTS_LOCKOUT_UNKNOWN_USERS_FAILURES_BERORE=3
 REM SET ACCOUNTS_LOCKOUT_UNKNOWN_USERS_LOCKOUT_PERIOD=60
 REM SET ACCOUNTS_LOCKOUT_UNKNOWN_USERS_FAILURE_WINDOW=15
+
+REM # ==== ACCOUNT OPTIONS ====
+REM SET ACCOUNTS_COMMON_LOGIN_EXPIRATION_IN_DAYS=90
+
+REM # ==== Allow configuration to validate uploaded attachments ====
+REM SET ATTACHMENTS_UPLOAD_EXTERNAL_PROGRAM="avscan {file}"
+REM SET ATTACHMENTS_UPLOAD_MIME_TYPES="image/*,text/*"
+REM SET ATTACHMENTS_UPLOAD_MAX_SIZE=5000000
+
+REM # ==== Allow configuration to validate uploaded avatars ====
+REM SET AVATARS_UPLOAD_EXTERNAL_PROGRAM="avscan {file}"
+REM SET AVATARS_UPLOAD_MIME_TYPES="image/*"
+REM SET AVATARS_UPLOAD_MAX_SIZE=500000
 
 REM # ==== NOTIFICATION TRAY AFTER READ DAYS BEFORE REMOVE =====
 REM # Number of days after a notification is read before we remove it.
@@ -96,6 +161,10 @@ REM # The address of the server where Matomo is hosted.
 REM # example: - MATOMO_ADDRESS=https://example.com/matomo
 REM SET MATOMO_ADDRESS=
 
+REM # ==== METRICS ALLOWED IP ADDRESSES ====
+REM # https://github.com/wekan/wekan/wiki/Metrics
+REM SET METRICS_ALLOWED_IP_ADDRESSES=192.168.0.100,192.168.0.200
+
 REM # The value of the site ID given in Matomo server for Wekan
 REM # example: - MATOMO_SITE_ID=12345
 REM SET MATOMO_SITE_ID=
@@ -122,10 +191,148 @@ REM SET WEBHOOKS_ATTRIBUTES=
 
 REM ------------------------------------------------------------
 
+REM ## ==== AUTOLOGIN WITH OIDC/OAUTH2 ====
+REM ## https://github.com/wekan/wekan/wiki/autologin
+REM # SET OIDC_REDIRECTION_ENABLED=true
+
+REM ------------------------------------------------------------
+
+REM # OAUTH2 ORACLE on premise identity manager OIM
+REM SET ORACLE_OIM_ENABLED=true
+
+REM ------------------------------------------------------------
+
+REM ## ==== OAUTH2 AZURE ====
+REM ## https://github.com/wekan/wekan/wiki/Azure
+REM ## 1) Register the application with Azure. Make sure you capture
+REM ##    the application ID as well as generate a secret key.
+REM ## 2) Configure the environment variables. This differs slightly
+REM ##     by installation type, but make sure you have the following:
+REM SET OAUTH2_ENABLED=true
+REM ## Optional OAuth2 CA Cert, see https://github.com/wekan/wekan/issues/3299
+REM # SET OAUTH2_CA_CERT=ABCD1234
+REM ## Use OAuth2 ADFS additional changes. Also needs OAUTH2_ENABLED=true setting.
+REM # SET OAUTH2_ADFS_ENABLED=false
+REM ## Azure AD B2C. https://github.com/wekan/wekan/issues/5242
+REM # SET OAUTH2_B2C_ENABLED=false
+REM ## OAuth2 login style: popup or redirect.
+REM SET OAUTH2_LOGIN_STYLE=popup
+REM ## Application GUID captured during app registration:
+REM SET OAUTH2_CLIENT_ID=xxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxx
+REM ## Secret key generated during app registration:
+REM SET OAUTH2_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+REM # OAUTH2_SECRET_FILE : Secret key file for OAuth2 (Docker secrets)
+REM # example : SET OAUTH2_SECRET_FILE=/run/secrets/oauth2_secret
+REM SET OAUTH2_SECRET_FILE=
+REM SET OAUTH2_SERVER_URL=https://login.microsoftonline.com/
+REM SET OAUTH2_AUTH_ENDPOINT=/oauth2/v2.0/authorize
+REM SET OAUTH2_USERINFO_ENDPOINT=https://graph.microsoft.com/oidc/userinfo
+REM SET OAUTH2_TOKEN_ENDPOINT=/oauth2/v2.0/token
+REM ## The claim name you want to map to the unique ID field:
+REM SET OAUTH2_ID_MAP=email
+REM ## The claim name you want to map to the username field:
+REM SET OAUTH2_USERNAME_MAP=email
+REM ## The claim name you want to map to the full name field:
+REM SET OAUTH2_FULLNAME_MAP=name
+REM ## The claim name you want to map to the email field:
+REM SET OAUTH2_EMAIL_MAP=email
+
+REM ------------------------------------------------------------
+
+REM ## ==== OAUTH2 Nextcloud ====
+REM ## 1) Register the application with Nextcloud: https://your.nextcloud/index.php/settings/admin/security
+REM ##    Make sure you capture the application ID as well as generate a secret key.
+REM ##    Use https://your.wekan/_oauth/oidc for the redirect URI.
+REM ## 2) Configure the environment variables. This differs slightly
+REM ##     by installation type, but make sure you have the following:
+REM SET OAUTH2_ENABLED=true
+REM ## OAuth2 login style: popup or redirect.
+REM SET OAUTH2_LOGIN_STYLE=popup
+REM ## Application GUID captured during app registration:
+REM SET OAUTH2_CLIENT_ID=xxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxx
+REM ## Secret key generated during app registration:
+REM SET OAUTH2_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+REM SET OAUTH2_SERVER_URL=https://your-nextcloud.tld
+REM SET OAUTH2_AUTH_ENDPOINT=/index.php/apps/oauth2/authorize
+REM SET OAUTH2_USERINFO_ENDPOINT=/ocs/v2.php/cloud/user?format=json
+REM SET OAUTH2_TOKEN_ENDPOINT=/index.php/apps/oauth2/api/v1/token
+REM ## The claim name you want to map to the unique ID field:
+REM SET OAUTH2_ID_MAP=id
+REM ## The claim name you want to map to the username field:
+REM SET OAUTH2_USERNAME_MAP=id
+REM ## The claim name you want to map to the full name field:
+REM SET OAUTH2_FULLNAME_MAP=display-name
+REM ## The claim name you want to map to the email field:
+REM SET OAUTH2_EMAIL_MAP=email
+
+REM ------------------------------------------------------------
+
+REM ## ==== OAUTH2 KEYCLOAK ====
+REM ## https://github.com/wekan/wekan/wiki/Keycloak  <== MAPPING INFO, REQUIRED
+REM SET OAUTH2_ENABLED=true
+REM ## OAuth2 login style: popup or redirect.
+REM SET OAUTH2_LOGIN_STYLE=popup
+REM SET OAUTH2_CLIENT_ID=<Keycloak create Client ID>
+REM SET OAUTH2_SERVER_URL=<Keycloak server url - https://keycloak.example.com>
+REM SET OAUTH2_AUTH_ENDPOINT=/realms/<keycloak realm>/protocol/openid-connect/auth
+REM SET OAUTH2_USERINFO_ENDPOINT=/realms/<keycloak realm>/protocol/openid-connect/userinfo
+REM SET OAUTH2_TOKEN_ENDPOINT=/realms/<keycloak realm>/protocol/openid-connect/token
+REM SET OAUTH2_SECRET=<keycloak client secret>
+REM SET OAUTH2_ID_MAP=sub
+REM SET OAUTH2_USERNAME_MAP=preferred_username
+REM SET OAUTH2_EMAIL_MAP=email
+REM SET OAUTH2_FULLNAME_MAP=name
+
+REM ------------------------------------------------------------
+
+REM ## ==== OAUTH2 DOORKEEPER ====
+REM ## https://github.com/wekan/wekan/issues/1874
+REM ## https://github.com/wekan/wekan/wiki/OAuth2
+REM ## Enable the OAuth2 connection
+REM SET OAUTH2_ENABLED=true
+REM ## OAuth2 docs: https://github.com/wekan/wekan/wiki/OAuth2
+REM ## OAuth2 login style: popup or redirect.
+REM SET OAUTH2_LOGIN_STYLE=popup
+REM ## OAuth2 Client ID.
+REM SET OAUTH2_CLIENT_ID=abcde12345
+REM ## OAuth2 Secret.
+REM SET OAUTH2_SECRET=54321abcde
+REM ## OAuth2 Server URL.
+REM SET OAUTH2_SERVER_URL=https://chat.example.com
+REM ## OAuth2 Authorization Endpoint.
+REM SET OAUTH2_AUTH_ENDPOINT=/oauth/authorize
+REM ## OAuth2 Userinfo Endpoint.
+REM SET OAUTH2_USERINFO_ENDPOINT=/oauth/userinfo
+REM ## OAuth2 Token Endpoint.
+REM SET OAUTH2_TOKEN_ENDPOINT=/oauth/token
+REM ## OAUTH2 ID Token Whitelist Fields.
+REM SET OAUTH2_ID_TOKEN_WHITELIST_FIELDS=""
+REM ## OAUTH2 Request Permissions.
+REM SET OAUTH2_REQUEST_PERMISSIONS=openid profile email
+REM ## OAuth2 ID Mapping
+REM # SET OAUTH2_ID_MAP=
+REM ## OAuth2 Username Mapping
+REM # SET OAUTH2_USERNAME_MAP=
+REM ## OAuth2 Fullname Mapping
+REM # SET OAUTH2_FULLNAME_MAP=
+REM ## OAuth2 Email Mapping
+REM # SET OAUTH2_EMAIL_MAP=
+
+REM ------------------------------------------------------------
+
 REM # Enable the OAuth2 connection
 REM # OAuth2 docs: https://github.com/wekan/wekan/wiki/OAuth2
 REM # example: OAUTH2_ENABLED=true
 REM SET OAUTH2_ENABLED=false
+
+REM # Optional OAuth2 CA Cert, see https://github.com/wekan/wekan/issues/3299
+REM SET OAUTH2_CA_CERT=ABCD1234
+
+REM # Use OAuth2 ADFS additional changes. Also needs OAUTH2_ENABLED=true setting.
+REM SET OAUTH2_ADFS_ENABLED=false
+
+REM # Use OAuth2 Azure AD B2C. Also requires OAUTH2_ENABLED=true setting . https://github.com/wekan/wekan/issues/5242
+REM SET DEFAULT_OAUTH2_B2C_ENABLED=false
 
 REM # OAuth2 Client ID, for example from Rocket.Chat. Example: abcde12345
 REM # example: OAUTH2_CLIENT_ID=abcde12345
@@ -156,7 +363,7 @@ REM # OAUTH2 ID Token Whitelist Fields.
 REM SET OAUTH2_ID_TOKEN_WHITELIST_FIELDS=[]
 
 REM # OAUTH2 Request Permissions.
-REM SET OAUTH2_REQUEST_PERMISSIONS='openid profile email'
+REM SET OAUTH2_REQUEST_PERMISSIONS=openid profile email
 
 REM # OAuth2 ID Mapping
 REM SET OAUTH2_ID_MAP=
@@ -172,22 +379,62 @@ REM SET OAUTH2_EMAIL_MAP=
 
 REM ------------------------------------------------------------
 
+REM ## ==== LDAP: UNCOMMENT ALL TO ENABLE LDAP ====
+REM ## https://github.com/wekan/wekan/wiki/LDAP
+REM ## Note: Do not add single quotes '' to variables. Having spaces still works without quotes where required.
+
+REM # The default authentication method used if a user does not exist to create and authenticate. Can be set as ldap.
+REM # (this is set properly in the Admin Panel, changing this item does not remove Password login option)
+REM SET DEFAULT_AUTHENTICATION_METHOD=ldap
+
 REM # LDAP_ENABLE : Enable or not the connection by the LDAP
-REM # example : LDAP_ENABLE=true
-REM SET LDAP_ENABLE=false
+REM SET LDAP_ENABLE=true
 
 REM # LDAP_PORT : The port of the LDAP server
-REM # example : LDAP_PORT=389
 REM SET LDAP_PORT=389
 
 REM # LDAP_HOST : The host server for the LDAP server
-REM # example : LDAP_HOST=localhost
-REM SET LDAP_HOST=
+REM SET LDAP_HOST=localhost
 
+REM #-----------------------------------------------------------------
+REM # ==== LDAP AD Simple Auth ====
+REM # Set to true, if you want to connect with Active Directory by Simple Authentication.
+REM # When using AD Simple Auth, LDAP_BASEDN is not needed.
+REM SET LDAP_AD_SIMPLE_AUTH=true
+
+REM #-----------------------------------------------------------------
+REM # === LDAP User Authentication ===
+REM #
+REM # a) Option to login to the LDAP server with the user's own username and password, instead of
+REM #    an administrator key. Default: false (use administrator key).
+REM #
+REM # b) When using AD Simple Auth, set to true, when login user is used for binding,
+REM #    and LDAP_BASEDN is not needed.
+REM #
+REM # Example:
+REM SET LDAP_USER_AUTHENTICATION=true
+
+REM # Which field is used to find the user for the user authentication. Default: uid.
+REM SET LDAP_USER_AUTHENTICATION_FIELD=uid
+
+REM # === LDAP Default Domain ===
+REM #
+REM # a) In case AD SimpleAuth is configured, the default domain is appended to the given
+REM #    loginname for creating the correct username for the bind request to AD.
+REM #
+REM # b) The default domain of the ldap it is used to create email if the field is not map
+REM #     correctly with the LDAP_SYNC_USER_DATA_FIELDMAP
+REM #
+REM # Example :
+REM SET LDAP_DEFAULT_DOMAIN=mydomain.com
+
+REM #-----------------------------------------------------------------
+REM # ==== LDAP BASEDN Auth ====
 REM # LDAP_BASEDN : The base DN for the LDAP Tree
 REM # example : LDAP_BASEDN=ou=user,dc=example,dc=org
 REM SET LDAP_BASEDN=
 
+REM #-----------------------------------------------------------------
 REM # LDAP_LOGIN_FALLBACK : Fallback on the default authentication method
 REM # example : LDAP_LOGIN_FALLBACK=true
 REM SET LDAP_LOGIN_FALLBACK=false
@@ -224,6 +471,9 @@ REM SET LDAP_AUTHENTIFICATION_USERDN="CN=wekan_adm,OU=serviceaccounts,OU=admin,O
 REM # LDAP_AUTHENTIFICATION_PASSWORD : The password for the search user
 REM # example : AUTHENTIFICATION_PASSWORD=admin
 REM SET LDAP_AUTHENTIFICATION_PASSWORD=
+REM # LDAP_AUTHENTIFICATION_PASSWORD_FILE : The password file for the search user (Docker secrets)
+REM # example : SET LDAP_AUTHENTIFICATION_PASSWORD_FILE=/run/secrets/ldap_auth_password
+REM SET LDAP_AUTHENTIFICATION_PASSWORD_FILE=
 
 REM # LDAP_LOG_ENABLED : Enable logs for the module
 REM # example : LDAP_LOG_ENABLED=true
@@ -234,6 +484,9 @@ REM # example : LDAP_BACKGROUND_SYNC=true
 REM SET LDAP_BACKGROUND_SYNC=false
 
 REM # LDAP_BACKGROUND_SYNC_INTERVAL : At which interval does the background task sync in milliseconds
+REM # The format must be as specified in:
+REM # https://bunkat.github.io/later/parsers.html#text
+REM SET LDAP_BACKGROUND_SYNC_INTERVAL=every 1 hours
 REM # At which interval does the background task sync in milliseconds.
 REM # Leave this unset, so it uses default, and does not crash.
 REM # https://github.com/wekan/wekan/issues/2354#issuecomment-515305722
@@ -258,12 +511,6 @@ REM SET LDAP_CA_CERT=
 REM # LDAP_REJECT_UNAUTHORIZED : Reject Unauthorized Certificate
 REM # example : LDAP_REJECT_UNAUTHORIZED=true
 REM SET LDAP_REJECT_UNAUTHORIZED=false
-
-REM # Option to login to the LDAP server with the user's own username and password, instead of an administrator key. Default: false (use administrator key).
-REM SET LDAP_USER_AUTHENTICATION=true
-
-REM # Which field is used to find the user for the user authentication. Default: uid.
-REM SET LDAP_USER_AUTHENTICATION_FIELD=uid
 
 REM # LDAP_USER_SEARCH_FILTER : Optional extra LDAP filters. Don't forget the outmost enclosing parentheses if needed
 REM # example : LDAP_USER_SEARCH_FILTER=
@@ -349,13 +596,12 @@ REM # LDAP_SYNC_USER_DATA_FIELDMAP :
 REM # example : LDAP_SYNC_USER_DATA_FIELDMAP={"cn":"name", "mail":"email"}
 REM SET LDAP_SYNC_USER_DATA_FIELDMAP=
 
+REM # The default domain of the ldap it is used to create email if the field is not map correctly
+REM # with the LDAP_SYNC_USER_DATA_FIELDMAP is defined in setting LDAP_DEFAULT_DOMAIN above.
+
 REM # LDAP_SYNC_GROUP_ROLES :
 REM # example :
 REM # SET LDAP_SYNC_GROUP_ROLES=
-
-REM # LDAP_DEFAULT_DOMAIN : The default domain of the ldap it is used to create email if the field is not map correctly with the LDAP_SYNC_USER_DATA_FIELDMAP
-REM # example :
-REM SET LDAP_DEFAULT_DOMAIN=
 
 REM # Enable/Disable syncing of admin status based on ldap groups:
 REM SET LDAP_SYNC_ADMIN_STATUS=true
@@ -395,6 +641,35 @@ REM # LOGOUT_ON_MINUTES : The number of minutes
 REM # example : LOGOUT_ON_MINUTES=55
 REM SET LOGOUT_ON_MINUTES=
 
-cd .build\bundle
+REM ## https://github.com/wekan/wekan/wiki/CAS
+REM SET CAS_ENABLED=true
+REM SET CAS_BASE_URL=https://cas.example.com/cas
+REM SET CAS_LOGIN_URL=https://cas.example.com/login
+REM SET CAS_VALIDATE_URL=https://cas.example.com/cas/p3/serviceValidate
+
+REM ## https://github.com/wekan/wekan/wiki/SAML
+REM SET SAML_ENABLED=true
+REM SET SAML_PROVIDER=
+REM SET SAML_ENTRYPOINT=
+REM SET SAML_ISSUER=
+REM SET SAML_CERT=
+REM SET SAML_IDPSLO_REDIRECTURL=
+REM SET SAML_PRIVATE_KEYFILE=
+REM SET SAML_PUBLIC_CERTFILE=
+REM SET SAML_IDENTIFIER_FORMAT=
+REM SET SAML_LOCAL_PROFILE_MATCH_ATTRIBUTE=
+REM SET SAML_ATTRIBUTES=
+
+REM # Wait spinner to use https://github.com/wekan/wekan/wiki/Wait-Spinners
+REM SET WAIT_SPINNER=Bounce
+
+REM # https://github.com/wekan/wekan/issues/3585#issuecomment-1021522132
+REM # Add more Node heap:
+REM # SET NODE_OPTIONS="--max_old_space_size=4096"
+REM # Add more stack. ulimit is not at Windows, stack-size is at Windows:
+REM #   bash -c "ulimit -s 65500; exec node --stack-size=65500 main.js"
+REM #node --stack-size=65500 main.js
+
+REM #-------------------- OPTIONAL SETTINGS END --------------------
+
 node main.js
-cd ..\..

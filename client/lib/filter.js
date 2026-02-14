@@ -1,3 +1,25 @@
+import { ReactiveCache } from '/imports/reactiveCache';
+import { 
+  formatDateTime, 
+  formatDate, 
+  formatTime, 
+  getISOWeek, 
+  isValidDate, 
+  isBefore, 
+  isAfter, 
+  isSame, 
+  add, 
+  subtract, 
+  startOf, 
+  endOf, 
+  format, 
+  parseDate, 
+  now, 
+  createDate, 
+  fromNow, 
+  calendar 
+} from '/imports/lib/dateUtils';
+
 // Filtered view manager
 // We define local filter objects for each different type of field (SetFilter,
 // RangeFilter, dateFilter, etc.). We then define a global `Filter` object whose
@@ -5,6 +27,196 @@
 // fields.
 function showFilterSidebar() {
   Sidebar.setView('filter');
+}
+
+class DateFilter {
+  constructor() {
+    this._dep = new Tracker.Dependency();
+    this.subField = ''; // Prevent name mangling in Filter
+    this._filter = null;
+    this._filterState = null;
+  }
+
+  _updateState(state) {
+    this._filterState = state;
+    showFilterSidebar();
+    this._dep.changed();
+  }
+
+  // past builds a filter for all dates before now
+  past() {
+    if (this._filterState == 'past') {
+      this.reset();
+      return;
+    }
+    this._filter = { $lte: now() };
+    this._updateState('past');
+  }
+
+  // today is a convenience method for calling relativeDay with 0
+  today() {
+    if (this._filterState == 'today') {
+      this.reset();
+      return;
+    }
+    this.relativeDay(0);
+    this._updateState('today');
+  }
+
+  // tomorrow is a convenience method for calling relativeDay with 1
+  tomorrow() {
+    if (this._filterState == 'tomorrow') {
+      this.reset();
+      return;
+    }
+    this.relativeDay(1);
+    this._updateState('tomorrow');
+  }
+
+  // thisWeek is a convenience method for calling relativeWeek with 1
+  thisWeek() {
+    this.relativeWeek(1, 'this')
+  }
+
+  // nextWeek is a convenience method for calling relativeWeek with 1
+  nextWeek() {
+    this.relativeWeek(1, 'next')
+  }
+
+  // relativeDay builds a filter starting from now and including all
+  // days up to today +/- offset.
+  relativeDay(offset) {
+    if (this._filterState == 'day') {
+      this.reset();
+      return;
+    }
+
+    var startDay = startOf(now(), 'day'),
+      endDay = endOf(add(now(), offset, 'day'), 'day');
+
+    if (offset >= 0) {
+      this._filter = { $gte: startDay, $lte: endDay };
+    } else {
+      this._filter = { $lte: startDay, $gte: endDay };
+    }
+
+    this._updateState('day');
+  }
+
+  // relativeWeek builds a filter starting from today (for this week)
+  // or 7 days after (for next week) and including all
+  // weeks up to today +/- offset. This considers the user's preferred
+  // start of week day (as defined by Meteor).
+  relativeWeek(offset, week) {
+    if (this._filterState == 'thisweek') {
+      this.reset();
+      return;
+    }
+
+    if (this._filterState == 'nextweek') {
+      this.reset();
+      return;
+    }
+
+    // getStartDayOfWeek returns the offset from Sunday of the user's
+    // preferred starting day of the week. This date should be added
+    // to the moment start of week to get the real start of week date.
+    // The default is 1, meaning Monday.
+    const currentUser = ReactiveCache.getCurrentUser();
+    const weekStartDay = currentUser ? currentUser.getStartDayOfWeek() : 1;
+
+    if (week === 'this') {
+      // Create week start and end dates
+      var WeekStart = startOf(add(startOf(now(), 'week'), weekStartDay, 'days'), 'day');
+      var WeekEnd = endOf(add(WeekStart, 6, 'days'), 'day');
+
+      this._updateState('thisweek');
+    } else if (week === 'next') {
+      // Create next week start and end dates
+      var WeekStart = startOf(add(startOf(now(), 'week'), weekStartDay + 7, 'days'), 'day');
+      var WeekEnd = endOf(add(WeekStart, 6, 'days'), 'day');
+
+     this._updateState('nextweek');
+    }
+
+    var startDate = WeekStart;
+    var endDate = WeekEnd;
+
+    if (offset >= 0) {
+      this._filter = { $gte: startDate, $lte: endDate };
+    } else {
+      this._filter = { $lte: startDate, $gte: endDate };
+    }
+  }
+
+  // noDate builds a filter for items where date is not set
+  noDate() {
+    if (this._filterState == 'noDate') {
+      this.reset();
+      return;
+    }
+    this._filter = null;
+    this._updateState('noDate');
+  }
+
+  reset() {
+    this._filter = null;
+    this._filterState = null;
+    this._dep.changed();
+  }
+
+  isSelected(val) {
+    this._dep.depend();
+    return this._filterState == val;
+  }
+
+  _isActive() {
+    this._dep.depend();
+    return this._filterState !== null;
+  }
+
+  _getMongoSelector() {
+    this._dep.depend();
+    return this._filter;
+  }
+
+  _getEmptySelector() {
+    this._dep.depend();
+    return null;
+  }
+}
+
+class StringFilter {
+  constructor() {
+    this._dep = new Tracker.Dependency();
+    this.subField = ''; // Prevent name mangling in Filter
+    this._filter = '';
+  }
+
+  set(str) {
+    this._filter = str;
+    this._dep.changed();
+  }
+
+  reset() {
+    this._filter = '';
+    this._dep.changed();
+  }
+
+  _isActive() {
+    this._dep.depend();
+    return this._filter !== '';
+  }
+
+  _getMongoSelector() {
+    this._dep.depend();
+    return {$regex : this._filter, $options: 'i'};
+  }
+
+  _getEmptySelector() {
+    this._dep.depend();
+    return {$regex : this._filter, $options: 'i'};
+  }
 }
 
 // Use a "set" filter for a field that is a set of documents uniquely
@@ -27,7 +239,6 @@ class SetFilter {
     if (this._indexOfVal(val) === -1) {
       this._selectedElements.push(val);
       this._dep.changed();
-      showFilterSidebar();
     }
   }
 
@@ -162,14 +373,14 @@ class AdvancedFilter {
   }
 
   _fieldNameToId(field) {
-    const found = CustomFields.findOne({
+    const found = ReactiveCache.getCustomField({
       name: field,
     });
     return found._id;
   }
 
   _fieldValueToId(field, value) {
-    const found = CustomFields.findOne({
+    const found = ReactiveCache.getCustomField({
       name: field,
     });
     if (
@@ -462,6 +673,8 @@ Filter = {
   assignees: new SetFilter(),
   archive: new SetFilter(),
   hideEmpty: new SetFilter(),
+  dueAt: new DateFilter(),
+  title: new StringFilter(),
   customFields: new SetFilter('_id'),
   advanced: new AdvancedFilter(),
   lists: new AdvancedFilter(), // we need the ability to filter list by name as well
@@ -472,6 +685,8 @@ Filter = {
     'assignees',
     'archive',
     'hideEmpty',
+    'dueAt',
+    'title',
     'customFields',
   ],
 
@@ -497,9 +712,11 @@ Filter = {
     const filterSelector = {};
     const emptySelector = {};
     let includeEmptySelectors = false;
+    let isFilterActive = false; // we don't want there is only Filter.lists
     this._fields.forEach(fieldName => {
       const filter = this[fieldName];
       if (filter._isActive()) {
+        isFilterActive = true;
         if (filter.subField !== '') {
           filterSelector[
             `${fieldName}.${filter.subField}`
@@ -530,12 +747,23 @@ Filter = {
     )
       selectors.push(filterSelector);
     if (includeEmptySelectors) selectors.push(emptySelector);
-    if (this.advanced._isActive())
+    if (this.advanced._isActive()) {
+      isFilterActive = true;
       selectors.push(this.advanced._getMongoSelector());
+    }
 
-    return {
-      $or: selectors,
-    };
+    if(isFilterActive) {
+      return {
+        $or: selectors,
+      };
+    }
+    else {
+      // we don't want there is only Filter.lists
+      // otherwise no card will be displayed ...
+      // selectors = [exceptionsSelector];
+      // will return [{"_id":{"$in":[]}}]
+      return {};
+    }
   },
 
   mongoSelector(additionalSelector) {

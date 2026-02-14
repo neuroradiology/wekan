@@ -1,11 +1,10 @@
-BlazeLayout.setRoot('body');
+import { ReactiveCache } from '/imports/reactiveCache';
+import { TAPi18n } from '/imports/i18n';
+import { FlowRouter } from 'meteor/ostrio:flow-router-extra';
 
-const i18nTagToT9n = i18nTag => {
-  // t9n/i18n tags are same now, see: https://github.com/softwarerero/meteor-accounts-t9n/pull/129
-  // but we keep this conversion function here, to be aware that that they are different system.
-  return i18nTag;
-};
-
+let alreadyCheck = 1;
+let isCheckDone = false;
+let counter = 0;
 const validator = {
   set(obj, prop, value) {
     if (prop === 'state' && value !== 'signIn') {
@@ -20,40 +19,187 @@ const validator = {
   },
 };
 
-Template.userFormsLayout.onCreated(function() {
+Template.userFormsLayout.onCreated(function () {
   const templateInstance = this;
   templateInstance.currentSetting = new ReactiveVar();
   templateInstance.isLoading = new ReactiveVar(false);
 
-  Meteor.subscribe('setting', {
-    onReady() {
-      templateInstance.currentSetting.set(Settings.findOne());
-      return this.stop();
-    },
-  });
-  Meteor.call('isPasswordLoginDisabled', (_, result) => {
-    if (result) {
-      $('.at-pwd-form').hide();
-    }
-  });
+  if (!ReactiveCache.getCurrentUser()?.profile) {
+    Meteor.call('isOidcRedirectionEnabled', (_, result) => {
+      if (result) {
+        AccountsTemplates.options.socialLoginStyle = 'redirect';
+        options = {
+          loginStyle: AccountsTemplates.options.socialLoginStyle,
+        };
+        Meteor.loginWithOidc(options);
+      }
+    });
+
+    Meteor.subscribe('setting', {
+      onReady() {
+        templateInstance.currentSetting.set(ReactiveCache.getCurrentSetting());
+        return this.stop();
+      },
+    });
+  }
 });
 
 Template.userFormsLayout.onRendered(() => {
-  AccountsTemplates.state.form.keys = new Proxy(
-    AccountsTemplates.state.form.keys,
-    validator,
-  );
+  Meteor.call('getAuthenticationsEnabled', (_, result) => {
+    let enabledAuthenticationMethods = ['password']; // we show/hide this based on isPasswordLoginEnabled
 
-  const i18nTag = navigator.language;
-  if (i18nTag) {
-    T9n.setLanguage(i18nTagToT9n(i18nTag));
-  }
-  EscapeActions.executeAll();
+    if (result) {
+      Object.keys(result).forEach((m) => {
+        if (result[m]) enabledAuthenticationMethods.push(m);
+      });
+    }
+
+    Meteor.call('isPasswordLoginEnabled', (_, result) => {
+      if (result) {
+        $('.at-pwd-form').show();
+      }
+    });
+
+    Meteor.call('isDisableRegistration', (_, result) => {
+      if (result) {
+        $('.at-signup-link').hide();
+      }
+    });
+
+    Meteor.call('isDisableForgotPassword', (_, result) => {
+      if (result) {
+        $('.at-pwd-link').hide();
+      }
+    });
+
+    if (enabledAuthenticationMethods.indexOf('oauth2') !== -1) {
+      // TODO find better way to run this code once the oauth2 UI is injected in the DOM
+      (function waitForElementAndShow() {
+        if (!$('.at-oauth')[0]) return setTimeout(waitForElementAndShow, 100);
+        $('.at-oauth').show();
+      })();
+    }
+
+    AccountsTemplates.state.form.keys = new Proxy(
+      AccountsTemplates.state.form.keys,
+      validator,
+    );
+    EscapeActions.executeAll();
+
+    // Set up MutationObserver for OIDC button instead of deprecated DOMSubtreeModified
+    const oidcButton = document.getElementById('at-oidc');
+    if (oidcButton) {
+      const observer = new MutationObserver((mutations) => {
+        if (alreadyCheck <= 2) {
+          let currSetting = ReactiveCache.getCurrentSetting();
+          let oidcBtnElt = $('#at-oidc');
+          if (
+            currSetting &&
+            currSetting !== undefined &&
+            currSetting.oidcBtnText !== undefined &&
+            oidcBtnElt != null &&
+            oidcBtnElt != undefined
+          ) {
+            let htmlvalue = "<i class='fa fa-oidc'></i>" + currSetting.oidcBtnText;
+            if (alreadyCheck == 1) {
+              alreadyCheck++;
+              oidcBtnElt.html('');
+            } else {
+              alreadyCheck++;
+              oidcBtnElt.html(htmlvalue);
+            }
+          }
+        } else {
+          alreadyCheck = 1;
+        }
+      });
+      observer.observe(oidcButton, { childList: true, subtree: true });
+    }
+
+    // Set up MutationObserver for .at-form instead of deprecated DOMSubtreeModified
+    const atForm = document.querySelector('.at-form');
+    if (atForm) {
+      const formObserver = new MutationObserver((mutations) => {
+        if (alreadyCheck <= 2 && !isCheckDone) {
+          if (document.getElementById('at-oidc') != null) {
+            let currSetting = ReactiveCache.getCurrentSetting();
+            let oidcBtnElt = $('#at-oidc');
+            if (
+              currSetting &&
+              currSetting !== undefined &&
+              currSetting.oidcBtnText !== undefined &&
+              oidcBtnElt != null &&
+              oidcBtnElt != undefined
+            ) {
+              let htmlvalue =
+                "<i class='fa fa-oidc'></i>" + currSetting.oidcBtnText;
+              if (alreadyCheck == 1) {
+                alreadyCheck++;
+                oidcBtnElt.html('');
+              } else {
+                alreadyCheck++;
+                isCheckDone = true;
+                oidcBtnElt.html(htmlvalue);
+              }
+            }
+          }
+        } else {
+          alreadyCheck = 1;
+        }
+      });
+      formObserver.observe(atForm, { childList: true, subtree: true });
+    }
+
+    // Add autocomplete attribute to login input for WCAG compliance
+    const loginInput = document.querySelector(
+      'input[type="text"], input[type="email"]',
+    );
+    if (
+      loginInput &&
+      loginInput.name &&
+      (loginInput.name.toLowerCase().includes('user') ||
+        loginInput.name.toLowerCase().includes('email'))
+    ) {
+      loginInput.setAttribute('autocomplete', 'username email');
+    }
+
+    // Add autocomplete attributes to password fields for WCAG compliance
+    const passwordInputs = document.querySelectorAll('input[type="password"]');
+    passwordInputs.forEach((input) => {
+      if (input.name && input.name.includes('password')) {
+        if (
+          input.name.includes('password_again') ||
+          input.name.includes('new_password')
+        ) {
+          input.setAttribute('autocomplete', 'new-password');
+        } else {
+          input.setAttribute('autocomplete', 'current-password');
+        }
+      }
+    });
+  });
 });
 
 Template.userFormsLayout.helpers({
-  currentSetting() {
-    return Template.instance().currentSetting.get();
+  isLegalNoticeLinkExist() {
+    const currSet = Template.instance().currentSetting.get();
+    if (currSet && currSet !== undefined && currSet != null) {
+      return (
+        currSet.legalNotice !== undefined && currSet.legalNotice.trim() != ''
+      );
+    } else return false;
+  },
+
+  getLegalNoticeWithWritTraduction() {
+    let spanLegalNoticeElt = $('#legalNoticeSpan');
+    if (spanLegalNoticeElt != null && spanLegalNoticeElt != undefined) {
+      spanLegalNoticeElt.html(TAPi18n.__('acceptance_of_our_legalNotice', {}));
+    }
+    let atLinkLegalNoticeElt = $('#legalNoticeAtLink');
+    if (atLinkLegalNoticeElt != null && atLinkLegalNoticeElt != undefined) {
+      atLinkLegalNoticeElt.html(TAPi18n.__('legalNotice', {}));
+    }
+    return true;
   },
 
   isLoading() {
@@ -69,39 +215,27 @@ Template.userFormsLayout.helpers({
   },
 
   languages() {
-    return _.map(TAPi18n.getLanguages(), (lang, code) => {
-      const tag = code;
-      let name = lang.name;
-      if (lang.name === 'br') {
-        name = 'Brezhoneg';
-      } else if (lang.name === 'ig') {
-        name = 'Igbo';
-      } else if (lang.name === 'oc') {
-        name = 'Occitan';
-      } else if (lang.name === '繁体中文（台湾）') {
-        name = '繁體中文（台灣）';
-      }
-      return { tag, name };
-    }).sort(function(a, b) {
-      if (a.name === b.name) {
-        return 0;
-      } else {
-        return a.name > b.name ? 1 : -1;
-      }
-    });
+    return TAPi18n.getSupportedLanguages()
+      .map(({ tag, name, rtl }) => ({ tag, name, rtl }))
+      .sort((a, b) => {
+        if (a.name === b.name) {
+          return 0;
+        } else {
+          return a.name > b.name ? 1 : -1;
+        }
+      });
   },
 
   isCurrentLanguage() {
-    const t9nTag = i18nTagToT9n(this.tag);
-    const curLang = T9n.getLanguage() || 'en';
-    return t9nTag === curLang;
+    const curLang = TAPi18n.getLanguage();
+    return this.tag === curLang;
   },
 });
 
 Template.userFormsLayout.events({
   'change .js-userform-set-language'(event) {
-    const i18nTag = $(event.currentTarget).val();
-    T9n.setLanguage(i18nTagToT9n(i18nTag));
+    const tag = $(event.currentTarget).val();
+    TAPi18n.setLanguage(tag);
     event.preventDefault();
   },
   'click #at-btn'(event, templateInstance) {
@@ -111,6 +245,7 @@ Template.userFormsLayout.events({
         templateInstance.isLoading.set(false);
       });
     }
+    isCheckDone = false;
   },
 });
 
@@ -139,15 +274,28 @@ async function authentication(event, templateInstance) {
 
   switch (result) {
     case 'ldap':
-      return new Promise(resolve => {
-        Meteor.loginWithLDAP(match, password, function() {
+      return new Promise((resolve) => {
+        Meteor.loginWithLDAP(match, password, function () {
           resolve(FlowRouter.go('/'));
         });
       });
 
+    case 'saml':
+      return new Promise((resolve) => {
+        const provider = Meteor.settings.public.SAML_PROVIDER;
+        Meteor.loginWithSaml(
+          {
+            provider,
+          },
+          function () {
+            resolve(FlowRouter.go('/'));
+          },
+        );
+      });
+
     case 'cas':
-      return new Promise(resolve => {
-        Meteor.loginWithCas(match, password, function() {
+      return new Promise((resolve) => {
+        Meteor.loginWithCas(match, password, function () {
           resolve(FlowRouter.go('/'));
         });
       });
@@ -158,9 +306,15 @@ async function authentication(event, templateInstance) {
 }
 
 function getAuthenticationMethod(
-  { displayAuthenticationMethod, defaultAuthenticationMethod },
+  settings,
   match,
 ) {
+  if (!settings) {
+    return getUserAuthenticationMethod(undefined, match);
+  }
+
+  const { displayAuthenticationMethod, defaultAuthenticationMethod } = settings;
+
   if (displayAuthenticationMethod) {
     return $('.select-authentication').val();
   }
@@ -168,12 +322,11 @@ function getAuthenticationMethod(
 }
 
 function getUserAuthenticationMethod(defaultAuthenticationMethod, match) {
-  return new Promise(resolve => {
+  return new Promise((resolve) => {
     try {
       Meteor.subscribe('user-authenticationMethod', match, {
         onReady() {
           const user = Users.findOne();
-
           const authenticationMethod = user
             ? user.authenticationMethod
             : defaultAuthenticationMethod;

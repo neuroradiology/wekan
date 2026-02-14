@@ -1,62 +1,90 @@
 template(name="swimlane")
-  .swimlane
+  .swimlane.nodragscroll
     +swimlaneHeader
   unless collapseSwimlane
-    .swimlane.js-lists.js-swimlane
+    .swimlane.js-lists.js-swimlane.dragscroll(id="swimlane-{{_id}}"
+                                   style="height:{{swimlaneHeight}};")
+      .swimlane-resize-handle.js-swimlane-resize-handle.nodragscroll
       if isMiniScreen
         if currentListIsInThisSwimlane _id
           +list(currentList)
         unless currentList
-          each lists
-            +miniList(this)
           if currentUser.isBoardMember
             unless currentUser.isCommentOnly
               +addListForm
+          each lists
+            +miniList(this)
       else
-        each lists
-          +list(this)
-          if currentCardIsInThisList _id ../_id
-            +cardDetails(currentCard)
         if currentUser.isBoardMember
           unless currentUser.isCommentOnly
             +addListForm
+        each lists
+          if visible this
+            +list(this)
+          if currentCardIsInThisList _id ../_id
+            +cardDetails(currentCard)
 
 template(name="listsGroup")
-  .swimlane.list-group.js-lists
+  .swimlane.list-group.js-lists.dragscroll
     if isMiniScreen
       if currentList
         +list(currentList)
       else
         each lists
           +miniList(this)
-        if currentUser.isBoardMember
-          unless currentUser.isCommentOnly
-            +addListForm
     else
       each lists
         if visible this
           +list(this)
         if currentCardIsInThisList _id null
           +cardDetails(currentCard)
-      if currentUser.isBoardMember
-        unless currentUser.isCommentOnly
-          +addListForm
 
 template(name="addListForm")
   unless currentUser.isWorker
-    .list.list-composer.js-list-composer(class="{{#if isMiniScreen}}mini-list{{/if}}")
-      .list-header-add
-        +inlinedForm(autoclose=false)
-          input.list-name-input.full-line(type="text" placeholder="{{_ 'add-list'}}"
-            autocomplete="off" autofocus)
-          .edit-controls.clearfix
-            button.primary.confirm(type="submit") {{_ 'save'}}
-            unless currentBoard.isTemplatesBoard
-              unless currentBoard.isTemplateBoard
-                span.quiet
-                  | {{_ 'or'}}
-                  a.js-list-template {{_ 'template'}}
-        else
-          a.open-list-composer.js-open-inlined-form
-            i.fa.fa-plus
-            | {{_ 'add-list'}}
+    unless currentUser.isCommentOnly
+      unless currentUser.isReadOnly
+        unless currentUser.isReadAssignedOnly
+          .list.list-composer.js-list-composer(class="{{#if isMiniScreen}}mini-list{{/if}}")
+        .list-header-add
+          +inlinedForm(autoclose=false)
+            input.list-name-input.full-line(type="text" placeholder="{{_ 'add-list'}}"
+              autocomplete="off" autofocus)
+            if currentBoard.getLastList
+              | {{_ 'add-after-list'}}
+              select.list-position-input.full-line
+                each currentBoard.lists
+                  option(value="{{_id}}" selected=currentBoard.getLastList.title) {{title}}
+            .edit-controls.clearfix
+              button.primary.confirm(type="submit") {{_ 'save'}}
+              .js-close-inlined-form
+                i.fa.fa-times-thin
+              unless currentBoard.isTemplatesBoard
+                unless currentBoard.isTemplateBoard
+                  span.quiet
+                    | {{_ 'or'}}
+                    a.js-list-template {{_ 'template'}}
+          else
+            a.open-list-composer.js-open-inlined-form(title="{{_ 'add-list'}}")
+              i.fa.fa-plus
+
+template(name="moveSwimlanePopup")
+  if currentUser
+    unless currentUser.isWorker
+      label {{_ 'boards'}}:
+      select.js-select-boards(autofocus)
+        each toBoard in toBoards
+          option(value="{{toBoard._id}}") {{toBoard.title}}
+
+      .edit-controls.clearfix
+        button.primary.confirm.js-done {{_ 'done'}}
+
+template(name="copySwimlanePopup")
+  if currentUser
+    unless currentUser.isWorker
+      label {{_ 'boards'}}:
+      select.js-select-boards(autofocus)
+        each toBoard in toBoards
+          option(value="{{toBoard._id}}" selected="{{#if $eq toBoard.title board.title}}1{{/if}}") {{toBoard.title}}
+
+      .edit-controls.clearfix
+        button.primary.confirm.js-done {{_ 'done'}}

@@ -1,10 +1,11 @@
 *~
-*.swp
+*.sw*
 .meteor-spk
 *.sublime-workspace
 tmp/
 node_modules/
 npm-debug.log
+.gitmodules
 .vscode/
 .idea/
 .build/*
@@ -30,5 +31,11 @@ Thumbs.db
 ehthumbs.db
 .eslintcache
 .meteor/local
-.meteor-1.6-snap/.meteor/local
 .devcontainer/docker-compose.extend.yml
+.devcontainer/volumes*/
+.coverage
+
+# Helm chart
+# Chart dependencies
+/helm/wekan/**/*.tgz
+/helm/wekan/charts

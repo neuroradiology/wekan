@@ -1,97 +1,180 @@
-const activitiesPerPage = 20;
+import { ReactiveCache } from '/imports/reactiveCache';
+import DOMPurify from 'dompurify';
+import { sanitizeHTML, sanitizeText } from '/imports/lib/secureDOMPurify';
+import { TAPi18n } from '/imports/i18n';
+
+const activitiesPerPage = 500;
 
 BlazeComponent.extendComponent({
   onCreated() {
     // XXX Should we use ReactiveNumber?
     this.page = new ReactiveVar(1);
     this.loadNextPageLocked = false;
-    const sidebar = this.parentComponent(); // XXX for some reason not working
-    sidebar.callFirstWith(null, 'resetNextPeak');
+    // TODO is sidebar always available? E.g. on small screens/mobile devices
+    const sidebar = Sidebar;
+    sidebar && sidebar.callFirstWith(null, 'resetNextPeak');
     this.autorun(() => {
-      let mode = this.data().mode;
-      const capitalizedMode = Utils.capitalize(mode);
-      let thisId, searchId;
-      if (mode === 'linkedcard' || mode === 'linkedboard') {
-        thisId = Session.get('currentCard');
-        searchId = Cards.findOne({ _id: thisId }).linkedId;
-        mode = mode.replace('linked', '');
-      } else {
-        thisId = Session.get(`current${capitalizedMode}`);
-        searchId = thisId;
-      }
-      const limit = this.page.get() * activitiesPerPage;
-      const user = Meteor.user();
-      const hideSystem = user ? user.hasHiddenSystemMessages() : false;
-      if (searchId === null) return;
-
-      this.subscribe('activities', mode, searchId, limit, hideSystem, () => {
-        this.loadNextPageLocked = false;
-
-        // If the sibear peak hasn't increased, that mean that there are no more
-        // activities, and we can stop calling new subscriptions.
-        // XXX This is hacky! We need to know excatly and reactively how many
-        // activities there are, we probably want to denormalize this number
-        // dirrectly into card and board documents.
-        const nextPeakBefore = sidebar.callFirstWith(null, 'getNextPeak');
-        sidebar.calculateNextPeak();
-        const nextPeakAfter = sidebar.callFirstWith(null, 'getNextPeak');
-        if (nextPeakBefore === nextPeakAfter) {
-          sidebar.callFirstWith(null, 'resetNextPeak');
+      let mode = this.data()?.mode;
+      if (mode) {
+        const capitalizedMode = Utils.capitalize(mode);
+        let searchId;
+        const showActivities = this.showActivities();
+        if (mode === 'linkedcard' || mode === 'linkedboard') {
+          const currentCard = Utils.getCurrentCard();
+          searchId = currentCard.linkedId;
+          mode = mode.replace('linked', '');
+        } else if (mode === 'card') {
+          searchId = Utils.getCurrentCardId();
+        } else {
+          searchId = Session.get(`current${capitalizedMode}`);
         }
-      });
+        const limit = this.page.get() * activitiesPerPage;
+        if (searchId === null) return;
+
+        this.subscribe('activities', mode, searchId, limit, showActivities, () => {
+          this.loadNextPageLocked = false;
+
+          // TODO the guard can be removed as soon as the TODO above is resolved
+          if (!sidebar) return;
+          // If the sibear peak hasn't increased, that mean that there are no more
+          // activities, and we can stop calling new subscriptions.
+          // XXX This is hacky! We need to know excatly and reactively how many
+          // activities there are, we probably want to denormalize this number
+          // dirrectly into card and board documents.
+          const nextPeakBefore = sidebar.callFirstWith(null, 'getNextPeak');
+          sidebar.calculateNextPeak();
+          const nextPeakAfter = sidebar.callFirstWith(null, 'getNextPeak');
+          if (nextPeakBefore === nextPeakAfter) {
+            sidebar.callFirstWith(null, 'resetNextPeak');
+          }
+        });
+      }
     });
   },
-}).register('activities');
-
-BlazeComponent.extendComponent({
   loadNextPage() {
     if (this.loadNextPageLocked === false) {
       this.page.set(this.page.get() + 1);
       this.loadNextPageLocked = true;
     }
   },
+  showActivities() {
+    let ret = false;
+    let mode = this.data()?.mode;
+    if (mode) {
+      if (mode === 'linkedcard' || mode === 'linkedboard') {
+        const currentCard = Utils.getCurrentCard();
+        ret = currentCard.showActivities ?? false;
+      } else if (mode === 'card') {
+        ret = this.data()?.card?.showActivities ?? false;
+      } else {
+        ret = Utils.getCurrentBoard().showActivities ?? false;
+      }
+    }
+    return ret;
+  },
+  activities() {
+    const ret = this.data().card.activities();
+    return ret;
+  },
+}).register('activities');
 
+BlazeComponent.extendComponent({
   checkItem() {
     const checkItemId = this.currentData().activity.checklistItemId;
-    const checkItem = ChecklistItems.findOne({ _id: checkItemId });
+    const checkItem = ReactiveCache.getChecklistItem(checkItemId);
     return checkItem && checkItem.title;
   },
 
-  boardLabel() {
+  boardLabelLink() {
     const data = this.currentData();
+    const currentBoardId = Session.get('currentBoard');
     if (data.mode !== 'board') {
-      return createBoardLink(data.activity.board(), data.activity.listName);
+      // data.mode: card, linkedcard, linkedboard
+      return createBoardLink(data.activity.board(), data.activity.listName ? data.activity.listName : null);
+    }
+    else if (currentBoardId != data.activity.boardId) {
+      // data.mode: board
+      // current activitie is linked
+      return createBoardLink(data.activity.board(), data.activity.listName ? data.activity.listName : null);
     }
     return TAPi18n.__('this-board');
   },
 
-  cardLabel() {
+  cardLabelLink() {
     const data = this.currentData();
-    if (data.mode !== 'card') {
-      return createCardLink(this.currentData().activity.card());
+    const currentBoardId = Session.get('currentBoard');
+    if (data.mode == 'card') {
+      // data.mode: card
+      return TAPi18n.__('this-card');
     }
-    return TAPi18n.__('this-card');
+    else if (data.mode !== 'board') {
+      // data.mode: linkedcard, linkedboard
+      return createCardLink(data.activity.card(), null);
+    }
+    else if (currentBoardId != data.activity.boardId) {
+      // data.mode: board
+      // current activitie is linked
+      return createCardLink(data.activity.card(), data.activity.board().title);
+    }
+    return createCardLink(this.currentData().activity.card(), null);
   },
 
   cardLink() {
-    return createCardLink(this.currentData().activity.card());
+    const data = this.currentData();
+    const currentBoardId = Session.get('currentBoard');
+    if (data.mode !== 'board') {
+      // data.mode: card, linkedcard, linkedboard
+      return createCardLink(data.activity.card(), null);
+    }
+    else if (currentBoardId != data.activity.boardId) {
+      // data.mode: board
+      // current activitie is linked
+      return createCardLink(data.activity.card(), data.activity.board().title);
+    }
+    return createCardLink(this.currentData().activity.card(), null);
+  },
+
+  receivedDate() {
+    const receivedDate = this.currentData().activity.card();
+    if (!receivedDate) return null;
+    return receivedDate.receivedAt;
+  },
+
+  startDate() {
+    const startDate = this.currentData().activity.card();
+    if (!startDate) return null;
+    return startDate.startAt;
+  },
+
+  dueDate() {
+    const dueDate = this.currentData().activity.card();
+    if (!dueDate) return null;
+    return dueDate.dueAt;
+  },
+
+  endDate() {
+    const endDate = this.currentData().activity.card();
+    if (!endDate) return null;
+    return endDate.endAt;
   },
 
   lastLabel() {
     const lastLabelId = this.currentData().activity.labelId;
     if (!lastLabelId) return null;
-    const lastLabel = Boards.findOne(
+    const lastLabel = ReactiveCache.getBoard(
       this.currentData().activity.boardId,
     ).getLabelById(lastLabelId);
     if (lastLabel && (lastLabel.name === undefined || lastLabel.name === '')) {
       return lastLabel.color;
-    } else {
+    } else if (lastLabel.name !== undefined && lastLabel.name !== '') {
       return lastLabel.name;
+    } else {
+      return null;
     }
   },
 
   lastCustomField() {
-    const lastCustomField = CustomFields.findOne(
+    const lastCustomField = ReactiveCache.getCustomField(
       this.currentData().activity.customFieldId,
     );
     if (!lastCustomField) return null;
@@ -99,7 +182,7 @@ BlazeComponent.extendComponent({
   },
 
   lastCustomFieldValue() {
-    const lastCustomField = CustomFields.findOne(
+    const lastCustomField = ReactiveCache.getCustomField(
       this.currentData().activity.customFieldId,
     );
     if (!lastCustomField) return null;
@@ -134,11 +217,11 @@ BlazeComponent.extendComponent({
             {
               href: source.url,
             },
-            source.system,
+            sanitizeHTML(source.system),
           ),
         );
       } else {
-        return source.system;
+        return sanitizeHTML(source.system);
       }
     }
     return null;
@@ -155,17 +238,17 @@ BlazeComponent.extendComponent({
     // trying to display url before file is stored generates js errors
     return (
       (attachment &&
-        attachment.url({ download: true }) &&
+        attachment.path &&
         Blaze.toHTML(
           HTML.A(
             {
-              href: attachment.url({ download: true }),
+              href: `${attachment.link()}?download=true`,
               target: '_blank',
             },
-            attachment.name(),
+            sanitizeText(attachment.name),
           ),
         )) ||
-      this.currentData().activity.attachmentName
+      sanitizeText(this.currentData().activity.attachmentName)
     );
   },
 
@@ -175,43 +258,82 @@ BlazeComponent.extendComponent({
     return customField.name;
   },
 
-  events() {
-    return [
-      {
-        // XXX We should use Popup.afterConfirmation here
-        'click .js-delete-comment'() {
-          const commentId = this.currentData().activity.commentId;
-          CardComments.remove(commentId);
-        },
-        'submit .js-edit-comment'(evt) {
-          evt.preventDefault();
-          const commentText = this.currentComponent()
-            .getValue()
-            .trim();
-          const commentId = Template.parentData().activity.commentId;
-          if (commentText) {
-            CardComments.update(commentId, {
-              $set: {
-                text: commentText,
-              },
-            });
-          }
-        },
-      },
-    ];
-  },
 }).register('activity');
 
-function createCardLink(card) {
+Template.activity.helpers({
+  sanitize(value) {
+    return sanitizeHTML(value);
+  },
+});
+
+Template.commentReactions.events({
+  'click .reaction'(event) {
+    if (ReactiveCache.getCurrentUser().isBoardMember()) {
+      const codepoint = event.currentTarget.dataset['codepoint'];
+      const commentId = Template.instance().data.commentId;
+      const cardComment = ReactiveCache.getCardComment(commentId);
+      cardComment.toggleReaction(codepoint);
+    }
+  },
+  'click .open-comment-reaction-popup': Popup.open('addReaction'),
+})
+
+Template.addReactionPopup.events({
+  'click .add-comment-reaction'(event) {
+    if (ReactiveCache.getCurrentUser().isBoardMember()) {
+      const codepoint = event.currentTarget.dataset['codepoint'];
+      const commentId = Template.instance().data.commentId;
+      const cardComment = ReactiveCache.getCardComment(commentId);
+      cardComment.toggleReaction(codepoint);
+    }
+    Popup.back();
+  },
+})
+
+Template.addReactionPopup.helpers({
+  codepoints() {
+    // Starting set of unicode codepoints as comment reactions
+    return [
+      '&#128077;',
+      '&#128078;',
+      '&#128064;',
+      '&#9989;',
+      '&#10060;',
+      '&#128591;',
+      '&#128079;',
+      '&#127881;',
+      '&#128640;',
+      '&#128522;',
+      '&#129300;',
+      '&#128532;'];
+  }
+})
+
+Template.commentReactions.helpers({
+  isSelected(userIds) {
+    return Meteor.userId() && userIds.includes(Meteor.userId());
+  },
+  userNames(userIds) {
+    const ret = ReactiveCache.getUsers({_id: {$in: userIds}})
+      .map(user => user.profile.fullname)
+      .join(', ');
+    return ret;
+  }
+})
+
+function createCardLink(card, board) {
+  if (!card) return '';
+  let text = card.title;
+  if (board) text = `${board} > ` + text;
   return (
     card &&
     Blaze.toHTML(
       HTML.A(
         {
-          href: card.absoluteUrl(),
+          href: card.originRelativeUrl(),
           class: 'action-card',
         },
-        card.title,
+        sanitizeHTML(text),
       ),
     )
   );
@@ -225,10 +347,10 @@ function createBoardLink(board, list) {
     Blaze.toHTML(
       HTML.A(
         {
-          href: board.absoluteUrl(),
+          href: board.originRelativeUrl(),
           class: 'action-board',
         },
-        text,
+        sanitizeHTML(text),
       ),
     )
   );

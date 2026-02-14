@@ -1,35 +1,8 @@
 {
   "name": "wekan",
-  "version": "v3.97.0",
+  "version": "v8.32.0",
   "description": "Open-Source kanban",
   "private": true,
-  "scripts": {
-    "lint": "eslint --cache --ext .js --ignore-path .eslintignore .",
-    "lint:eslint:fix": "eslint --ext .js --ignore-path .eslintignore --fix .",
-    "lint:staged": "lint-staged",
-    "prettify": "prettier --write '**/*.js' '**/*.jsx'",
-    "test": "npm run lint"
-  },
-  "lint-staged": {
-    "*.js": [
-      "meteor npm run prettify",
-      "meteor npm run lint:eslint:fix",
-      "git add --force"
-    ],
-    "*.jsx": [
-      "meteor npm run prettify",
-      "meteor npm run lint:eslint:fix",
-      "git add --force"
-    ],
-    "*.json": [
-      "prettier --write",
-      "git add --force"
-    ]
-  },
-  "pre-commit": "lint:staged",
-  "eslintConfig": {
-    "extends": "@meteorjs/eslint-config-meteor"
-  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/wekan/wekan.git"
@@ -38,37 +11,54 @@
   "bugs": {
     "url": "https://github.com/wekan/wekan/issues"
   },
-  "homepage": "https://wekan.github.io",
+  "homepage": "https://wekan.fi",
   "devDependencies": {
-    "eslint": "^5.16.0",
-    "eslint-config-meteor": "0.0.9",
-    "eslint-config-prettier": "^3.6.0",
-    "eslint-import-resolver-meteor": "^0.4.0",
-    "eslint-plugin-import": "^2.20.0",
-    "eslint-plugin-meteor": "^5.1.0",
-    "eslint-plugin-prettier": "^3.1.2",
-    "lint-staged": "^7.3.0",
-    "pre-commit": "^1.2.2",
-    "prettier": "^1.19.1",
-    "prettier-eslint": "^9.0.1"
+    "flatted": "^3.3.1",
+    "sinon": "^21.0.1"
   },
   "dependencies": {
-    "@babel/runtime": "^7.9.2",
-    "ajv": "^5.0.0",
-    "babel-runtime": "^6.26.0",
-    "bcrypt": "^3.0.7",
-    "bson": "^4.0.3",
-    "bunyan": "^1.8.12",
+    "@babel/runtime": "^7.28.4",
+    "@mapbox/node-pre-gyp": "^2.0.3",
+    "@meteorjs/reify": "^0.25.4",
+    "@rwap/jquery-ui-touch-punch": "^1.0.11",
+    "@textcomplete/contenteditable": "^0.1.13",
+    "@textcomplete/core": "^0.1.13",
+    "@textcomplete/textarea": "^0.1.13",
+    "@wekanteam/dragscroll": "^0.0.9",
+    "@wekanteam/exceljs": "^4.6.0",
+    "@wekanteam/html-to-markdown": "^1.0.2",
+    "@wekanteam/meteor-globals": "^1.1.6",
+    "@wekanteam/meteor-reactive-cache": "^1.0.7",
+    "ajv": "^6.12.6",
+    "bcryptjs": "^2.4.3",
+    "bson": "^4.7.2",
+    "chart.js": "^4.5.0",
+    "dompurify": "^3.2.7",
     "es6-promise": "^4.2.4",
-    "flatted": "^2.0.1",
-    "gridfs-stream": "^0.5.3",
-    "ldapjs": "^1.0.2",
-    "meteor-node-stubs": "^0.4.1",
-    "mongodb": "^3.5.0",
-    "os": "^0.1.1",
-    "page": "^1.11.5",
-    "qs": "^6.9.1",
-    "source-map-support": "^0.5.16",
-    "xss": "^1.0.6"
+    "escape-string-regexp": "^5.0.0",
+    "fibers": "^5.0.3",
+    "file-type": "^16.5.4",
+    "filesize": "^8.0.7",
+    "hotkeys-js": "^3.13.15",
+    "i18next": "^21.10.0",
+    "i18next-sprintf-postprocessor": "^0.2.2",
+    "jquery": "^3.7.1",
+    "jquery-ui": "^1.13.3",
+    "jszip": "^3.7.1",
+    "ldapjs": "^2.3.3",
+    "limax": "4.1.0",
+    "markdown-it": "^12.3.2",
+    "markdown-it-emoji": "^2.0.0",
+    "markdown-it-mathjax3": "^4.3.2",
+    "meteor-accounts-t9n": "^2.6.0",
+    "meteor-node-stubs": "^1.2.25",
+    "os": "^0.1.2",
+    "papaparse": "^5.5.3",
+    "pretty-ms": "^7.0.1",
+    "qs": "^6.14.1",
+    "simpl-schema": "^3.4.6",
+    "source-map-support": "^0.5.20",
+    "to-buffer": "^1.2.1",
+    "uuid": "^8.3.2"
   }
 }

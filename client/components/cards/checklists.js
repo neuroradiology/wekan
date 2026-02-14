@@ -1,4 +1,11 @@
-const { calculateIndexData, enableClickOnTouch } = Utils;
+import { ReactiveCache } from '/imports/reactiveCache';
+import { TAPi18n } from '/imports/i18n';
+import Cards from '/models/cards';
+import Boards from '/models/boards';
+import { DialogWithBoardSwimlaneListCard } from '/client/lib/dialogWithBoardSwimlaneListCard';
+
+const subManager = new SubsManager();
+const { calculateIndexData, capitalize } = Utils;
 
 function initSorting(items) {
   items.sortable({
@@ -6,13 +13,13 @@ function initSorting(items) {
     helper: 'clone',
     items: '.js-checklist-item:not(.placeholder)',
     connectWith: '.js-checklist-items',
-    appendTo: '.board-canvas',
+    appendTo: 'parent',
     distance: 7,
     placeholder: 'checklist-item placeholder',
-    scroll: false,
+    scroll: true,
     start(evt, ui) {
       ui.placeholder.height(ui.helper.height());
-      EscapeActions.executeUpTo('popup-close');
+      EscapeActions.clickExecute(evt.target, 'inlinedForm');
     },
     stop(evt, ui) {
       const parent = ui.item.parents('.js-checklist-items');
@@ -36,9 +43,6 @@ function initSorting(items) {
       checklistItem.move(checklistId, sortIndex.base);
     },
   });
-
-  // ugly touch event hotfix
-  enableClickOnTouch('.js-checklist-item:not(.placeholder)');
 }
 
 BlazeComponent.extendComponent({
@@ -46,33 +50,32 @@ BlazeComponent.extendComponent({
     const self = this;
     self.itemsDom = this.$('.js-checklist-items');
     initSorting(self.itemsDom);
-    self.itemsDom.mousedown(function(evt) {
+    self.itemsDom.mousedown(function (evt) {
       evt.stopPropagation();
     });
 
     function userIsMember() {
-      return Meteor.user() && Meteor.user().isBoardMember();
+      return ReactiveCache.getCurrentUser()?.isBoardMember();
     }
 
     // Disable sorting if the current user is not a board member
     self.autorun(() => {
       const $itemsDom = $(self.itemsDom);
-      if ($itemsDom.data('sortable')) {
+      if ($itemsDom.data('uiSortable') || $itemsDom.data('sortable')) {
         $(self.itemsDom).sortable('option', 'disabled', !userIsMember());
-      }
-      if ($itemsDom.data('sortable')) {
-        $(self.itemsDom).sortable('option', 'disabled', Utils.isMiniScreen());
+        if (Utils.isTouchScreenOrShowDesktopDragHandles()) {
+          $(self.itemsDom).sortable({
+            handle: 'span.fa.checklistitem-handle',
+          });
+        }
       }
     });
   },
 
-  canModifyCard() {
-    return (
-      Meteor.user() &&
-      Meteor.user().isBoardMember() &&
-      !Meteor.user().isCommentOnly() &&
-      !Meteor.user().isWorker()
-    );
+  /** returns the finished percent of the checklist */
+  finishedPercent() {
+    const ret = this.data().checklist.finishedPercent();
+    return ret;
   },
 }).register('checklistDetail');
 
@@ -82,62 +85,79 @@ BlazeComponent.extendComponent({
     const textarea = this.find('textarea.js-add-checklist-item');
     const title = textarea.value.trim();
     let cardId = this.currentData().cardId;
-    const card = Cards.findOne(cardId);
-    if (card.isLinked()) cardId = card.linkedId;
+    const card = ReactiveCache.getCard(cardId);
+    //if (card.isLinked()) cardId = card.linkedId;
+    if (card.isLinkedCard()) {
+      cardId = card.linkedId;
+    }
+
+    let sortIndex;
+    let checklistItemIndex;
+    if (this.currentData().position === 'top') {
+      sortIndex = Utils.calculateIndexData(null, card.firstChecklist()).base;
+      checklistItemIndex = 0;
+    } else {
+      sortIndex = Utils.calculateIndexData(card.lastChecklist(), null).base;
+      checklistItemIndex = -1;
+    }
 
     if (title) {
       Checklists.insert({
         cardId,
         title,
-        sort: card.checklists().count(),
+        sort: sortIndex,
       });
+      this.closeAllInlinedForms();
       setTimeout(() => {
         this.$('.add-checklist-item')
-          .last()
+          .eq(checklistItemIndex)
           .click();
       }, 100);
     }
-    textarea.value = '';
-    textarea.focus();
   },
-
   addChecklistItem(event) {
     event.preventDefault();
     const textarea = this.find('textarea.js-add-checklist-item');
+    const newlineBecomesNewChecklistItem = this.find('input#toggleNewlineBecomesNewChecklistItem');
+    const newlineBecomesNewChecklistItemOriginOrder = this.find('input#toggleNewlineBecomesNewChecklistItemOriginOrder');
     const title = textarea.value.trim();
     const checklist = this.currentData().checklist;
 
     if (title) {
-      ChecklistItems.insert({
-        title,
-        checklistId: checklist._id,
-        cardId: checklist.cardId,
-        sort: checklist.itemCount(),
-      });
+      let checklistItems = [title];
+      if (newlineBecomesNewChecklistItem.checked) {
+        checklistItems = title.split('\n').map(_value => _value.trim());
+        if (this.currentData().position === 'top') {
+          if (newlineBecomesNewChecklistItemOriginOrder.checked === false) {
+            checklistItems = checklistItems.reverse();
+          }
+        }
+      }
+      let addIndex;
+      let sortIndex;
+      if (this.currentData().position === 'top') {
+        sortIndex = Utils.calculateIndexData(null, checklist.firstItem()).base;
+        addIndex = -1;
+      } else {
+        sortIndex = Utils.calculateIndexData(checklist.lastItem(), null).base;
+        addIndex = 1;
+      }
+      for (let checklistItem of checklistItems) {
+        ChecklistItems.insert({
+          title: checklistItem,
+          checklistId: checklist._id,
+          cardId: checklist.cardId,
+          sort: sortIndex,
+        });
+        sortIndex += addIndex;
+      }
     }
     // We keep the form opened, empty it.
     textarea.value = '';
     textarea.focus();
   },
 
-  canModifyCard() {
-    return (
-      Meteor.user() &&
-      Meteor.user().isBoardMember() &&
-      !Meteor.user().isCommentOnly() &&
-      !Meteor.user().isWorker()
-    );
-  },
-
-  deleteChecklist() {
-    const checklist = this.currentData().checklist;
-    if (checklist && checklist._id) {
-      Checklists.remove(checklist._id);
-      this.toggleDeleteDialog.set(false);
-    }
-  },
-
-  deleteItem() {
+  async deleteItem() {
     const checklist = this.currentData().checklist;
     const item = this.currentData().item;
     if (checklist && item && item._id) {
@@ -162,11 +182,6 @@ BlazeComponent.extendComponent({
     item.setTitle(title);
   },
 
-  onCreated() {
-    this.toggleDeleteDialog = new ReactiveVar(false);
-    this.checklistToDelete = null; //Store data context to pass to checklistDeleteDialog template
-  },
-
   pressKey(event) {
     //If user press enter key inside a form, submit it
     //Unless the user is also holding down the 'shift' key
@@ -177,66 +192,161 @@ BlazeComponent.extendComponent({
     }
   },
 
-  events() {
-    const events = {
-      'click .toggle-delete-checklist-dialog'(event) {
-        if ($(event.target).hasClass('js-delete-checklist')) {
-          this.checklistToDelete = this.currentData().checklist; //Store data context
-        }
-        this.toggleDeleteDialog.set(!this.toggleDeleteDialog.get());
-      },
-    };
+  focusChecklistItem(event) {
+    // If a new checklist is created, pre-fill the title and select it.
+    const checklist = this.currentData().checklist;
+    if (!checklist) {
+      const textarea = event.target;
+      textarea.value = capitalize(TAPi18n.__('r-checklist'));
+      textarea.select();
+    }
+  },
 
+  /** closes all inlined forms (checklist and checklist-item input fields) */
+  closeAllInlinedForms() {
+    this.$('.js-close-inlined-form').click();
+  },
+
+  events() {
     return [
       {
-        ...events,
+        'click .js-open-checklist-details-menu': Popup.open('checklistActions'),
         'submit .js-add-checklist': this.addChecklist,
         'submit .js-edit-checklist-title': this.editChecklist,
         'submit .js-add-checklist-item': this.addChecklistItem,
         'submit .js-edit-checklist-item': this.editChecklistItem,
+        'click .js-convert-checklist-item-to-card': Popup.open('convertChecklistItemToCard'),
         'click .js-delete-checklist-item': this.deleteItem,
-        'click .confirm-checklist-delete': this.deleteChecklist,
+        'focus .js-add-checklist-item': this.focusChecklistItem,
+        // add and delete checklist / checklist-item
+        'click .js-open-inlined-form': this.closeAllInlinedForms,
+        'click #toggleHideFinishedChecklist'(event) {
+          event.preventDefault();
+          this.data().card.toggleHideFinishedChecklist();
+        },
         keydown: this.pressKey,
       },
     ];
   },
 }).register('checklists');
 
-Template.checklistDeleteDialog.onCreated(() => {
-  const $cardDetails = this.$('.card-details');
-  this.scrollState = {
-    position: $cardDetails.scrollTop(), //save current scroll position
-    top: false, //required for smooth scroll animation
-  };
-  //Callback's purpose is to only prevent scrolling after animation is complete
-  $cardDetails.animate({ scrollTop: 0 }, 500, () => {
-    this.scrollState.top = true;
-  });
+BlazeComponent.extendComponent({
+  onCreated() {
+    subManager.subscribe('board', Session.get('currentBoard'), false);
+    this.selectedBoardId = new ReactiveVar(Session.get('currentBoard'));
+  },
 
-  //Prevent scrolling while dialog is open
-  $cardDetails.on('scroll', () => {
-    if (this.scrollState.top) {
-      //If it's already in position, keep it there. Otherwise let animation scroll
-      $cardDetails.scrollTop(0);
-    }
-  });
+  boards() {
+    const ret = ReactiveCache.getBoards(
+      {
+        archived: false,
+        'members.userId': Meteor.userId(),
+        _id: { $ne: ReactiveCache.getCurrentUser().getTemplatesBoardId() },
+      },
+      {
+        sort: { sort: 1 /* boards default sorting */ },
+      },
+    );
+    return ret;
+  },
+
+  swimlanes() {
+    const board = ReactiveCache.getBoard(this.selectedBoardId.get());
+    return board.swimlanes();
+  },
+
+  aBoardLists() {
+    const board = ReactiveCache.getBoard(this.selectedBoardId.get());
+    return board.lists();
+  },
+
+  events() {
+    return [
+      {
+        'change .js-select-boards'(event) {
+          this.selectedBoardId.set($(event.currentTarget).val());
+          subManager.subscribe('board', this.selectedBoardId.get(), false);
+        },
+      },
+    ];
+  },
+}).register('boardsSwimlanesAndLists');
+
+Template.checklists.helpers({
+  checklists() {
+    const card = ReactiveCache.getCard(this.cardId);
+    const ret = card.checklists();
+    return ret;
+  },
 });
 
-Template.checklistDeleteDialog.onDestroyed(() => {
-  const $cardDetails = this.$('.card-details');
-  $cardDetails.off('scroll'); //Reactivate scrolling
-  $cardDetails.animate({ scrollTop: this.scrollState.position });
-});
+BlazeComponent.extendComponent({
+  onRendered() {
+    autosize(this.$('textarea.js-add-checklist-item'));
+  },
+  events() {
+    return [
+      {
+        'click a.fa.fa-copy'(event) {
+          const $editor = this.$('textarea');
+          const promise = Utils.copyTextToClipboard($editor[0].value);
+
+          const $tooltip = this.$('.copied-tooltip');
+          Utils.showCopied(promise, $tooltip);
+        },
+      }
+    ];
+  }
+}).register('addChecklistItemForm');
+
+BlazeComponent.extendComponent({
+  events() {
+    return [
+      {
+        'click .js-delete-checklist': Popup.afterConfirm('checklistDelete', function () {
+          Popup.back(2);
+          const checklist = this.checklist;
+          if (checklist && checklist._id) {
+            Checklists.remove(checklist._id);
+          }
+        }),
+        'click .js-move-checklist': Popup.open('moveChecklist'),
+        'click .js-copy-checklist': Popup.open('copyChecklist'),
+        'click .js-hide-checked-checklist-items'(event) {
+          event.preventDefault();
+          this.data().checklist.toggleHideCheckedChecklistItems();
+          Popup.back();
+        },
+        'click .js-hide-all-checklist-items'(event) {
+          event.preventDefault();
+          this.data().checklist.toggleHideAllChecklistItems();
+          Popup.back();
+        },
+      }
+    ]
+  }
+}).register('checklistActionsPopup');
+
+BlazeComponent.extendComponent({
+  onRendered() {
+    autosize(this.$('textarea.js-edit-checklist-item'));
+  },
+  events() {
+    return [
+      {
+        'click a.fa.fa-copy'(event) {
+          const $editor = this.$('textarea');
+          const promise = Utils.copyTextToClipboard($editor[0].value);
+
+          const $tooltip = this.$('.copied-tooltip');
+          Utils.showCopied(promise, $tooltip);
+        },
+      }
+    ];
+  }
+}).register('editChecklistItemForm');
 
 Template.checklistItemDetail.helpers({
-  canModifyCard() {
-    return (
-      Meteor.user() &&
-      Meteor.user().isBoardMember() &&
-      !Meteor.user().isCommentOnly() &&
-      !Meteor.user().isWorker()
-    );
-  },
 });
 
 BlazeComponent.extendComponent({
@@ -255,3 +365,27 @@ BlazeComponent.extendComponent({
     ];
   },
 }).register('checklistItemDetail');
+
+/** Move Checklist Dialog */
+(class extends DialogWithBoardSwimlaneListCard {
+  getDialogOptions() {
+    const ret = ReactiveCache.getCurrentUser().getMoveChecklistDialogOptions();
+    return ret;
+  }
+  async setDone(cardId, options) {
+    ReactiveCache.getCurrentUser().setMoveChecklistDialogOption(this.currentBoardId, options);
+    await this.data().checklist.move(cardId);
+  }
+}).register('moveChecklistPopup');
+
+/** Copy Checklist Dialog */
+(class extends DialogWithBoardSwimlaneListCard {
+  getDialogOptions() {
+    const ret = ReactiveCache.getCurrentUser().getCopyChecklistDialogOptions();
+    return ret;
+  }
+  async setDone(cardId, options) {
+    ReactiveCache.getCurrentUser().setCopyChecklistDialogOption(this.currentBoardId, options);
+    await this.data().checklist.copy(cardId);
+  }
+}).register('copyChecklistPopup');

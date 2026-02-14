@@ -1,90 +1,97 @@
 #!/bin/bash
 
-echo "Note: If you use other locale than en_US.UTF-8 , you need to additionally install en_US.UTF-8"
-echo "      with 'sudo dpkg-reconfigure locales' , so that MongoDB works correctly."
-echo "      You can still use any other locale as your main locale."
-
-#Below script installs newest node 8.x for Debian/Ubuntu/Mint.
-#NODE_VERSION=12.16.2
-#X64NODE="https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz"
+echo "Recommended for development: Newest Debian or Ubuntu amd64 based distro, directly to SSD disk or dual boot, not VM. Works fast."
+echo "Note1: If you use other locale than en_US.UTF-8 , you need to additionally install en_US.UTF-8"
+echo "       with 'sudo dpkg-reconfigure locales' , so that MongoDB works correctly."
+echo "       You can still use any other locale as your main locale."
+echo "Note2: Console output is also logged to ../wekan-log.txt"
 
 function pause(){
 	read -p "$*"
 }
 
-function cprec(){
-	if [[ -d "$1" ]]; then
-		if [[ ! -d "$2" ]]; then
-			sudo mkdir -p "$2"
-		fi
-
-		for i in $(ls -A "$1"); do
-			cprec "$1/$i" "$2/$i"
-		done
-	else
-		sudo cp "$1" "$2"
-	fi
-}
-
-# sudo npm doesn't work right, so this is a workaround
-function npm_call(){
-	TMPDIR="/tmp/tmp_npm_prefix"
-	if [[ -d "$TMPDIR" ]]; then
-		rm -rf $TMPDIR
-	fi
-	mkdir $TMPDIR
-	NPM_PREFIX="$(npm config get prefix)"
-	npm config set prefix $TMPDIR
-	npm "$@"
-	npm config set prefix "$NPM_PREFIX"
-
-	echo "Moving files to $NPM_PREFIX"
-	for i in $(ls -A $TMPDIR); do
-		cprec "$TMPDIR/$i" "$NPM_PREFIX/$i"
-	done
-	rm -rf $TMPDIR
-}
-
-#function wekan_repo_check(){
-## UNCOMMENTING, IT'S NOT REQUIRED THAT /HOME/USERNAME IS /HOME/WEKAN
-#	git_remotes="$(git remote show 2>/dev/null)"
-#	res=""
-#	for i in $git_remotes; do
-#		res="$(git remote get-url $i | sed 's/.*wekan\/wekan.*/wekan\/wekan/')"
-#		if [[ "$res" == "wekan/wekan" ]]; then
-#		    break
-#		fi
-#	done
-#
-#	if [[ "$res" != "wekan/wekan" ]]; then
-#		echo "$PWD is not a wekan repository"
-#		exit;
-#	fi
-#}
-
 echo
 PS3='Please enter your choice: '
-options=("Install Wekan dependencies" "Build Wekan" "Quit")
+options=("Install Wekan dependencies" "Build Wekan" "Run Meteor for dev on http://localhost:4000" "Run Meteor for dev on http://localhost:4000 with trace warnings, and warnings using old Meteor API that will not exist in Meteor 3.0" "Run Meteor for dev on http://localhost:4000 with bundle visualizer" "Run Meteor for dev on http://CURRENT-IP-ADDRESS:4000" "Run Meteor for dev on http://CURRENT-IP-ADDRESS:4000 with MONGO_URL=mongodb://127.0.0.1:27019/wekan" "Run Meteor for dev on http://CUSTOM-IP-ADDRESS:PORT" "Run tests" "Save Meteor dependency chain to ../meteor-deps.txt" "Quit")
+
 select opt in "${options[@]}"
 do
     case $opt in
         "Install Wekan dependencies")
 
 		if [[ "$OSTYPE" == "linux-gnu" ]]; then
-	                echo "Linux";
+			echo "Linux";
 			# Debian, Ubuntu, Mint
-			sudo apt-get install -y build-essential gcc g++ make git curl wget
-			# npm nodejs
-			#sudo npm -g install npm
-			curl -0 -L https://npmjs.org/install.sh | sudo sh
-			sudo chown -R $(id -u):$(id -g) $HOME/.npm
-			sudo npm -g install n
-			sudo n 12.16.2
-			#curl -sL https://deb.nodesource.com/setup_8.x | sudo -E bash -
+			sudo apt install -y build-essential gcc g++ make git curl wget p7zip-full zip unzip unp npm p7zip-full
+			#curl -fsSL https://deb.nodesource.com/setup_14.x | sudo -E bash -
 			#sudo apt-get install -y nodejs
+			#sudo apt-get install -y npm
+			# Volta Node and NPM install manager, made with Rust https://volta.sh
+			# Volta uses home directory also with "npm -g install", no sudo needed.
+			# Volta install script is broken, so using n.
+			#curl https://get.volta.sh | bash
+			#export VOLTA_HOME="$HOME/.volta"
+			#export PATH="$VOLTA_HOME/bin:$PATH"
+			#volta install node@14
+			# npm nodejs
+			#curl -0 -L https://npmjs.org/install.sh | sudo sh
+			#sudo chown -R $(id -u):$(id -g) $HOME/.npm
+			sudo npm -g install n
+			# Using custom Node.js mirror with n Node.js version manager
+			# - Custom source: https://github.com/tj/n#custom-source
+			# - sudo -E uses existing environment variables, so that this can be used in build script:
+			#   https://github.com/tj/n/issues/584#issuecomment-523640742
+			export N_NODE_MIRROR=https://github.com/wekan/node-v14-esm/releases/download
+			sudo -E n 14.21.4
+			sudo npm -g uninstall node-pre-gyp
+			# Latest fibers for Meteor sudo mkdir -p /usr/local/lib/node_modules/fibers/.node-gyp sudo npm -g install fibers
+			sudo npm -g install @mapbox/node-pre-gyp
+			# Install Meteor, if it's not yet installed
+			sudo npm -g install meteor@2.16 --unsafe-perm
+			#sudo chown -R $(id -u):$(id -g) $HOME/.npm $HOME/.meteor
 		elif [[ "$OSTYPE" == "darwin"* ]]; then
-		        echo "macOS";
-			pause '1) Install XCode 2) Install Node 8.x from https://nodejs.org/en/ 3) Press [Enter] key to continue.'
+			echo "macOS"
+			softwareupdate --install-rosetta --agree-to-license
+			brew install npm
+			# Install n for home directory version of Node.js 14.21.4
+			npm -g install n
+			directory_name="~/.n"
+			if [ ! -d "$directory_name" ]; then
+			  mkdir "$directory_name"
+			  echo "Directory '$directory_name' created."
+			else
+			  echo "Directory '$directory_name' already exists."
+			fi
+			directory_name="~/.npm"
+			if [ ! -d "$directory_name" ]; then
+				mkdir "$directory_name"
+				echo "Directory '$directory_name' created."
+			else
+				echo "Directory '$directory_name' already exists."
+			fi
+			if awk '/node-v14-esm/{found=1; exit} END{exit !found}' ~/.zshrc; then
+			  echo "The text node-v14-esm alread exists in .zshrc"
+			else
+			  echo "The text node-v14-esm does not exist in .zshrc, adding for install node v14"
+			  echo "export N_NODE_MIRROR=https://github.com/wekan/node-v14-esm/releases/download" >> ~/.zshrc
+			  export N_NODE_MIRROR="https://github.com/wekan/node-v14-esm/releases/download"
+			fi
+                        if awk '/export N_PREFIX/{found=1; exit} END{exit !found}' ~/.zshrc; then
+                          echo "The text export N_PREFIX for local ~/.n directory already exists in .zshrc"
+                        else
+                          # echo "The text export N_PREFIX for local ~/.n directory does not exist in .zshrc, adding."
+                          echo "export N_PREFIX=~/.n" >> ~/.zshrc
+			  export N_PREFIX=~/.n
+			fi
+			npm config set prefix '~/.npm'
+			npm -g install npm@latest
+			n 14.21.4
+			npm -g uninstall node-pre-gyp
+			npm -g install @mapbox/node-pre-gyp
+			npm -g install node-gyp
+			npm -g install meteor@2.16
+			export PATH=~/.meteor:$PATH
+			exit;
 		elif [[ "$OSTYPE" == "cygwin" ]]; then
 		        # POSIX compatibility layer and Linux environment emulation for Windows
 		        echo "TODO: Add Cygwin";
@@ -106,34 +113,11 @@ do
 			exit;
 		fi
 
-	        ## Latest npm with Meteor 1.8.x
-	        npm_call -g install npm
-	        npm_call -g install node-gyp
-	        # Latest fibers for Meteor 1.8.x
-		sudo mkdir -p /usr/local/lib/node_modules/fibers/.node-gyp
-	        npm_call -g install fibers
-	        # Install Meteor, if it's not yet installed
-	        curl https://install.meteor.com | bash
-		sudo chown -R $(id -u):$(id -g) $HOME/.npm $HOME/.meteor
 		break
 		;;
-        "Build Wekan")
+
+    "Build Wekan")
 		echo "Building Wekan."
-		#wekan_repo_check
-		# REPOS BELOW ARE INCLUDED TO WEKAN REPO
-		#rm -rf packages/kadira-flow-router packages/meteor-useraccounts-core packages/meteor-accounts-cas packages/wekan-ldap packages/wekan-ldap packages/wekan-scrfollbar packages/meteor-accounts-oidc packages/markdown
-		#mkdir packages
-		#cd packages
-		#git clone --depth 1 -b master https://github.com/wekan/flow-router.git kadira-flow-router
-		#git clone --depth 1 -b master https://github.com/meteor-useraccounts/core.git meteor-useraccounts-core
-		#git clone --depth 1 -b master https://github.com/wekan/meteor-accounts-cas.git
-		#git clone --depth 1 -b master https://github.com/wekan/wekan-ldap.git
-		#git clone --depth 1 -b master https://github.com/wekan/wekan-scrollbar.git
-		#git clone --depth 1 -b master https://github.com/wekan/meteor-accounts-oidc.git
-		#git clone --depth 1 -b master --recurse-submodules https://github.com/wekan/markdown.git
-                #mv meteor-accounts-oidc/packages/switch_accounts-oidc wekan_accounts-oidc
-                #mv meteor-accounts-oidc/packages/switch_oidc wekan_oidc
-                #rm -rf meteor-accounts-oidc
 		#if [[ "$OSTYPE" == "darwin"* ]]; then
 		#	echo "sed at macOS";
 		#	sed -i '' 's/api\.versionsFrom/\/\/api.versionsFrom/' ~/repos/wekan/packages/meteor-useraccounts-core/package.js
@@ -142,29 +126,129 @@ do
 		#	sed -i 's/api\.versionsFrom/\/\/api.versionsFrom/' ~/repos/wekan/packages/meteor-useraccounts-core/package.js
 		#fi
 		#cd ..
-		sudo chown -R $(id -u):$(id -g) $HOME/.npm $HOME/.meteor
-		rm -rf node_modules .meteor/local
-		npm install
-		rm -rf .build
-		meteor build .build --directory
-		cp -f fix-download-unicode/cfs_access-point.txt .build/bundle/programs/server/packages/cfs_access-point.js
-		#Removed binary version of bcrypt because of security vulnerability that is not fixed yet.
-		#https://github.com/wekan/wekan/commit/4b2010213907c61b0e0482ab55abb06f6a668eac
-		#https://github.com/wekan/wekan/commit/7eeabf14be3c63fae2226e561ef8a0c1390c8d3c
-		#cd ~/repos/wekan/.build/bundle/programs/server/npm/node_modules/meteor/npm-bcrypt
-		#rm -rf node_modules/bcrypt
-		#meteor npm install bcrypt
-		cd .build/bundle/programs/server
-		rm -rf node_modules
-		npm install
-		#meteor npm install bcrypt
-		cd ../../../..
+		#sudo chown -R $(id -u):$(id -g) $HOME/.npm $HOME/.meteor
+		rm -rf .build/bundle node_modules .meteor/local .build
+		meteor npm install --production
+		meteor build .build --directory --platforms=web.browser
+		rm -rf .build/bundle/programs/web.browser.legacy
+		(cd .build/bundle/programs/server && rm -rf node_modules && chmod u+w *.json && meteor npm install --production)
+		#(cd .build/bundle/programs/server/node_modules/fibers && node build.js)
+		(cd .build/bundle/programs/server && npm install fibers --save-dev)
+		(cd .build/bundle/programs/server/npm/node_modules/meteor/accounts-password && meteor npm remove bcrypt && meteor npm install bcrypt --production)
+		# Cleanup
+		cd .build/bundle
+		find . -type d -name '*-garbage*' | xargs rm -rf
+		find . -name '*phantom*' | xargs rm -rf
+		find . -name '.*.swp' | xargs rm -f
+		find . -name '*.swp' | xargs rm -f
+		cd ../..
+		# Add fibers multi arch
+		#cd .build/bundle/programs/server/node_modules/fibers/bin
+		#curl https://releases.wekan.team/fibers-multi.7z -o fibers-multi.7z
+		#7z x fibers-multi.7z
+		#rm fibers-multi.7z
+		#cd ../../../../../../..
 		echo Done.
 		break
 		;;
-        "Quit")
+
+    "Run Meteor for dev on http://localhost:4000")
+		#Not in use, could increase RAM usage: NODE_OPTIONS="--max_old_space_size=4096"
+		#---------------------------------------------------------------------
+		# Logging of terminal output to console and to ../wekan-log.txt at end of this line: 2>&1 | tee ../wekan-log.txt
+		#WARN_WHEN_USING_OLD_API=true NODE_OPTIONS="--trace-warnings"
+		WRITABLE_PATH=.. WITH_API=true RICHER_CARD_COMMENT_EDITOR=false ROOT_URL=http://localhost:4000 meteor run --exclude-archs web.browser.legacy,web.cordova --port 4000 2>&1 | tee ../wekan-log.txt
+		#---------------------------------------------------------------------
 		break
-            ;;
-        *) echo invalid option;;
+		;;
+
+
+    "Run Meteor for dev on http://localhost:4000 with trace warnings, and warnings using old Meteor API that will not exist in Meteor 3.0")
+                #Not in use, could increase RAM usage: NODE_OPTIONS="--max_old_space_size=4096"
+                #---------------------------------------------------------------------
+                # Logging of terminal output to console and to ../wekan-log.txt at end of this line: 2>&1 | tee ../wekan-log.txt
+                WARN_WHEN_USING_OLD_API=true NODE_OPTIONS="--trace-warnings" WRITABLE_PATH=.. WITH_API=true RICHER_CARD_COMMENT_EDITOR=false ROOT_URL=http://localhost:4000 meteor run --exclude-archs web.browser.legacy,web.cordova --port 4000 2>&1 | tee ../wekan-log.txt
+                #---------------------------------------------------------------------
+                break
+                ;;
+
+    "Run Meteor for dev on http://localhost:4000 with bundle visualizer")
+		#Not in use, could increase RAM usage: NODE_OPTIONS="--max_old_space_size=4096"
+		#---------------------------------------------------------------------
+		#Logging of terminal output to console and to ../wekan-log.txt at end of this line: 2>&1 | tee ../wekan-log.txt
+		#WARN_WHEN_USING_OLD_API=true NODE_OPTIONS="--trace-warnings"
+		WRITABLE_PATH=.. WITH_API=true RICHER_CARD_COMMENT_EDITOR=false ROOT_URL=http://localhost:4000 meteor run --exclude-archs web.browser.legacy,web.cordova --port 4000 --extra-packages bundle-visualizer --production  2>&1 | tee ../wekan-log.txt
+		#---------------------------------------------------------------------
+		break
+		;;
+
+    "Run Meteor for dev on http://CURRENT-IP-ADDRESS:4000")
+		if [[ "$OSTYPE" == "darwin"* ]]; then
+		  IPADDRESS=$(ifconfig | grep broadcast | grep 'inet ' | cut -d: -f2 | awk '{ print $2}' | cut -d '/' -f 1 | grep '192.')
+		else
+		  IPADDRESS=$(ip a | grep 'noprefixroute' | grep 'inet ' | cut -d: -f2 | awk '{ print $2}' | cut -d '/' -f 1 | grep '192.')
+		fi
+		echo "Your IP address is $IPADDRESS"
+		#---------------------------------------------------------------------
+		#Not in use, could increase RAM usage: NODE_OPTIONS="--max_old_space_size=4096"
+		#---------------------------------------------------------------------
+		#Logging of terminal output to console and to ../wekan-log.txt at end of this line: 2>&1 | tee ../wekan-log.txt
+		#WARN_WHEN_USING_OLD_API=true NODE_OPTIONS="--trace-warnings"
+		WRITABLE_PATH=.. WITH_API=true RICHER_CARD_COMMENT_EDITOR=false ROOT_URL=http://$IPADDRESS:4000 meteor run --exclude-archs web.browser.legacy,web.cordova --port 4000 2>&1 | tee ../wekan-log.txt
+		#---------------------------------------------------------------------
+		break
+		;;
+
+    "Run Meteor for dev on http://CURRENT-IP-ADDRESS:4000 with MONGO_URL=mongodb://127.0.0.1:27019/wekan")
+                if [[ "$OSTYPE" == "darwin"* ]]; then
+                  IPADDRESS=$(ifconfig | grep broadcast | grep 'inet ' | cut -d: -f2 | awk '{ print $2}' | cut -d '/' -f 1 | grep '192.')
+                else
+                  IPADDRESS=$(ip a | grep 'noprefixroute' | grep 'inet ' | cut -d: -f2 | awk '{ print $2}' | cut -d '/' -f 1 | grep '192.')
+                fi
+                echo "Your IP address is $IPADDRESS"
+                #---------------------------------------------------------------------
+                #Not in use, could increase RAM usage: NODE_OPTIONS="--max_old_space_size=4096"
+                #---------------------------------------------------------------------
+                #Logging of terminal output to console and to ../wekan-log.txt at end of this line: 2>&1 | tee ../wekan-log.txt
+                #WARN_WHEN_USING_OLD_API=true NODE_OPTIONS="--trace-warnings"
+                MONGO_URL=mongodb://127.0.0.1:27019/wekan WRITABLE_PATH=.. WITH_API=true RICHER_CARD_COMMENT_EDITOR=false ROOT_URL=http://$IPADDRESS:4000 meteor run --exclude-archs web.browser.legacy,web.cordova --port 4000 2>&1 | tee ../wekan-log.txt
+                #---------------------------------------------------------------------
+                break
+                ;;
+
+    "Run Meteor for dev on http://CUSTOM-IP-ADDRESS:PORT")
+		ip address
+		echo "From above list, what is your IP address?"
+		read IPADDRESS
+		echo "On what port you would like to run Wekan?"
+		read PORT
+		echo "ROOT_URL=http://$IPADDRESS:$PORT"
+		#---------------------------------------------------------------------
+		#Not in use, could increase RAM usage: NODE_OPTIONS="--max_old_space_size=4096"
+		#---------------------------------------------------------------------
+		#Logging of terminal output to console and to ../wekan-log.txt at end of this line: 2>&1 | tee ../wekan-log.txt
+		#WARN_WHEN_USING_OLD_API=true NODE_OPTIONS="--trace-warnings"
+		WRITABLE_PATH=.. WITH_API=true RICHER_CARD_COMMENT_EDITOR=false ROOT_URL=http://$IPADDRESS:$PORT meteor run --exclude-archs web.browser.legacy,web.cordova --port $PORT 2>&1 | tee ../wekan-log.txt
+		#---------------------------------------------------------------------
+		break
+		;;
+
+    "Save Meteor dependency chain to ../meteor-deps.txt")
+                meteor list --tree > ../meteor-deps.txt
+                echo "Saved Meteor dependency chain to ../meteor-deps.txt"
+                #---------------------------------------------------------------------
+                break
+                ;;
+
+		"Run tests")
+								echo "Running tests (import regression)."
+								node tests/wekanCreator.import.test.js
+								break
+								;;
+
+    "Quit")
+		break
+		;;
+    *) echo invalid option;;
     esac
 done

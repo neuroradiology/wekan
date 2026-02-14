@@ -1,45 +1,53 @@
+import { ReactiveCache } from '/imports/reactiveCache';
+import { FlowRouter } from 'meteor/ostrio:flow-router-extra';
+
 BlazeComponent.extendComponent({
   onCreated() {
     this.subscribe('archivedBoards');
   },
 
+  isBoardAdmin() {
+    return ReactiveCache.getCurrentUser().isBoardAdmin();
+  },
+
   archivedBoards() {
-    return Boards.find(
+    const ret = ReactiveCache.getBoards(
       { archived: true },
       {
-        sort: { sort: 1 /* boards default sorting */ }
+        sort: { archivedAt: -1, modifiedAt: -1 },
       },
     );
+    return ret;
   },
 
   events() {
     return [
       {
-        'click .js-restore-board'() {
+        async 'click .js-restore-board'() {
           // TODO : Make isSandstorm variable global
           const isSandstorm =
             Meteor.settings &&
             Meteor.settings.public &&
             Meteor.settings.public.sandstorm;
-          if (isSandstorm && Session.get('currentBoard')) {
-            const currentBoard = Boards.findOne(Session.get('currentBoard'));
-            currentBoard.archive();
+          if (isSandstorm && Utils.getCurrentBoardId()) {
+            const currentBoard = Utils.getCurrentBoard();
+            await currentBoard.archive();
           }
           const board = this.currentData();
-          board.restore();
+          await board.restore();
           Utils.goBoardId(board._id);
         },
-        'click .js-delete-board': Popup.afterConfirm('boardDelete', function() {
-          Popup.close();
+        'click .js-delete-board': Popup.afterConfirm('boardDelete', async function() {
+          Popup.back();
           const isSandstorm =
             Meteor.settings &&
             Meteor.settings.public &&
             Meteor.settings.public.sandstorm;
-          if (isSandstorm && Session.get('currentBoard')) {
-            const currentBoard = Boards.findOne(Session.get('currentBoard'));
-            Boards.remove(currentBoard._id);
+          if (isSandstorm && Utils.getCurrentBoardId()) {
+            const currentBoard = Utils.getCurrentBoard();
+            await Boards.removeAsync(currentBoard._id);
           }
-          Boards.remove(this._id);
+          await Boards.removeAsync(this._id);
           FlowRouter.go('home');
         }),
       },

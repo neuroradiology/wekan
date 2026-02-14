@@ -1,10 +1,12 @@
+import { ReactiveCache } from '/imports/reactiveCache';
+
 RulesHelper = {
-  executeRules(activity) {
+  async executeRules(activity) {
     const matchingRules = this.findMatchingRules(activity);
     for (let i = 0; i < matchingRules.length; i++) {
       const action = matchingRules[i].getAction();
       if (action !== undefined) {
-        this.performAction(activity, action);
+        await this.performAction(activity, action);
       }
     }
   },
@@ -15,7 +17,7 @@ RulesHelper = {
     }
     const matchingFields = TriggersDef[activityType].matchingFields;
     const matchingMap = this.buildMatchingFieldsMap(activity, matchingFields);
-    const matchingTriggers = Triggers.find(matchingMap);
+    const matchingTriggers = ReactiveCache.getTriggers(matchingMap);
     const matchingRules = [];
     matchingTriggers.forEach(function(trigger) {
       const rule = trigger.getRule();
@@ -29,18 +31,34 @@ RulesHelper = {
   },
   buildMatchingFieldsMap(activity, matchingFields) {
     const matchingMap = { activityType: activity.activityType };
-    for (let i = 0; i < matchingFields.length; i++) {
+    matchingFields.forEach(field => {
       // Creating a matching map with the actual field of the activity
       // and with the wildcard (for example: trigger when a card is added
       // in any [*] board
-      matchingMap[matchingFields[i]] = {
-        $in: [activity[matchingFields[i]], '*'],
+      let value = activity[field];
+      if (field === 'oldListName') {
+        const oldList = ReactiveCache.getList(activity.oldListId);
+        if (oldList) {
+          value = oldList.title;
+        }
+      } else if (field === 'oldSwimlaneName') {
+        const oldSwimlane = ReactiveCache.getSwimlane(activity.oldSwimlaneId);
+        if (oldSwimlane) {
+          value = oldSwimlane.title;
+        }
+      }
+      let matchesList = [value, '*'];
+      if ((field === 'cardTitle') && (value !== undefined)) {
+        matchesList = value.split(/\W/).concat(matchesList);
+      }
+      matchingMap[field] = {
+        $in: matchesList,
       };
-    }
+    });
     return matchingMap;
   },
-  performAction(activity, action) {
-    const card = Cards.findOne({ _id: activity.cardId });
+  async performAction(activity, action) {
+    const card = ReactiveCache.getCard(activity.cardId);
     const boardId = activity.boardId;
     if (
       action.actionType === 'moveCardToTop' ||
@@ -51,10 +69,10 @@ RulesHelper = {
       if (action.listName === '*') {
         list = card.list();
         if (boardId !== action.boardId) {
-          list = Lists.findOne({ title: list.title, boardId: action.boardId });
+          list = ReactiveCache.getList({ title: list.title, boardId: action.boardId });
         }
       } else {
-        list = Lists.findOne({
+        list = ReactiveCache.getList({
           title: action.listName,
           boardId: action.boardId,
         });
@@ -68,21 +86,21 @@ RulesHelper = {
       let swimlane;
       let swimlaneId;
       if (action.swimlaneName === '*') {
-        swimlane = Swimlanes.findOne(card.swimlaneId);
+        swimlane = ReactiveCache.getSwimlane(card.swimlaneId);
         if (boardId !== action.boardId) {
-          swimlane = Swimlanes.findOne({
+          swimlane = ReactiveCache.getSwimlane({
             title: swimlane.title,
             boardId: action.boardId,
           });
         }
       } else {
-        swimlane = Swimlanes.findOne({
+        swimlane = ReactiveCache.getSwimlane({
           title: action.swimlaneName,
           boardId: action.boardId,
         });
       }
       if (swimlane === undefined) {
-        swimlaneId = Swimlanes.findOne({
+        swimlaneId = ReactiveCache.getSwimlane({
           title: 'Default',
           boardId: action.boardId,
         })._id;
@@ -94,12 +112,12 @@ RulesHelper = {
         const minOrder = _.min(
           list.cardsUnfiltered(swimlaneId).map(c => c.sort),
         );
-        card.move(action.boardId, swimlaneId, listId, minOrder - 1);
+        await card.move(action.boardId, swimlaneId, listId, minOrder - 1);
       } else {
         const maxOrder = _.max(
           list.cardsUnfiltered(swimlaneId).map(c => c.sort),
         );
-        card.move(action.boardId, swimlaneId, listId, maxOrder + 1);
+        await card.move(action.boardId, swimlaneId, listId, maxOrder + 1);
       }
     }
     if (action.actionType === 'sendEmail') {
@@ -107,12 +125,38 @@ RulesHelper = {
       const text = action.emailMsg || '';
       const subject = action.emailSubject || '';
       try {
-        Email.send({
-          to,
-          from: Accounts.emailTemplates.from,
-          subject,
-          text,
-        });
+        // Try to detect the recipient's language preference if it's a Wekan user
+        // Otherwise, use the default language for the rule-triggered emails
+        let recipientUser = null;
+        let recipientLang = TAPi18n.getLanguage() || 'en';
+
+        // Check if recipient is a Wekan user to get their language
+        if (to && to.includes('@')) {
+          recipientUser = ReactiveCache.getUser({ 'emails.address': to.toLowerCase() });
+          if (recipientUser && typeof recipientUser.getLanguage === 'function') {
+            recipientLang = recipientUser.getLanguage();
+          }
+        }
+
+        // Use EmailLocalization if available
+        if (typeof EmailLocalization !== 'undefined') {
+          EmailLocalization.sendEmail({
+            to,
+            from: Accounts.emailTemplates.from,
+            subject,
+            text,
+            language: recipientLang,
+            userId: recipientUser ? recipientUser._id : null
+          });
+        } else {
+          // Fallback to standard Email.send
+          Email.send({
+            to,
+            from: Accounts.emailTemplates.from,
+            subject,
+            text,
+          });
+        }
       } catch (e) {
         // eslint-disable-next-line no-console
         console.error(e);
@@ -203,13 +247,13 @@ RulesHelper = {
       }
     }
     if (action.actionType === 'archive') {
-      card.archive();
+      await card.archive();
     }
     if (action.actionType === 'unarchive') {
-      card.restore();
+      await card.restore();
     }
     if (action.actionType === 'setColor') {
-      card.setColor(action.selectedColor);
+      await card.setColor(action.selectedColor);
     }
     if (action.actionType === 'addLabel') {
       card.addLabel(action.labelId);
@@ -218,7 +262,7 @@ RulesHelper = {
       card.removeLabel(action.labelId);
     }
     if (action.actionType === 'addMember') {
-      const memberId = Users.findOne({ username: action.username })._id;
+      const memberId = ReactiveCache.getUser({ username: action.username })._id;
       card.assignMember(memberId);
     }
     if (action.actionType === 'removeMember') {
@@ -228,45 +272,45 @@ RulesHelper = {
           card.unassignMember(members[i]);
         }
       } else {
-        const memberId = Users.findOne({ username: action.username })._id;
+        const memberId = ReactiveCache.getUser({ username: action.username })._id;
         card.unassignMember(memberId);
       }
     }
     if (action.actionType === 'checkAll') {
-      const checkList = Checklists.findOne({
+      const checkList = ReactiveCache.getChecklist({
         title: action.checklistName,
         cardId: card._id,
       });
-      checkList.checkAllItems();
+      await checkList.checkAllItems();
     }
     if (action.actionType === 'uncheckAll') {
-      const checkList = Checklists.findOne({
+      const checkList = ReactiveCache.getChecklist({
         title: action.checklistName,
         cardId: card._id,
       });
-      checkList.uncheckAllItems();
+      await checkList.uncheckAllItems();
     }
     if (action.actionType === 'checkItem') {
-      const checkList = Checklists.findOne({
+      const checkList = ReactiveCache.getChecklist({
         title: action.checklistName,
         cardId: card._id,
       });
-      const checkItem = ChecklistItems.findOne({
+      const checkItem = ReactiveCache.getChecklistItem({
         title: action.checkItemName,
         checkListId: checkList._id,
       });
-      checkItem.check();
+      await checkItem.check();
     }
     if (action.actionType === 'uncheckItem') {
-      const checkList = Checklists.findOne({
+      const checkList = ReactiveCache.getChecklist({
         title: action.checklistName,
         cardId: card._id,
       });
-      const checkItem = ChecklistItems.findOne({
+      const checkItem = ReactiveCache.getChecklistItem({
         title: action.checkItemName,
         checkListId: checkList._id,
       });
-      checkItem.uncheck();
+      await checkItem.uncheck();
     }
     if (action.actionType === 'addChecklist') {
       Checklists.insert({
@@ -296,7 +340,7 @@ RulesHelper = {
         sort: 0,
       });
       const itemsArray = action.checklistItems.split(',');
-      const checkList = Checklists.findOne({ _id: checkListId });
+      const checkList = ReactiveCache.getChecklist(checkListId);
       for (let i = 0; i < itemsArray.length; i++) {
         ChecklistItems.insert({
           title: itemsArray[i],
@@ -307,10 +351,10 @@ RulesHelper = {
       }
     }
     if (action.actionType === 'createCard') {
-      const list = Lists.findOne({ title: action.listName, boardId });
+      const list = ReactiveCache.getList({ title: action.listName, boardId });
       let listId = '';
       let swimlaneId = '';
-      const swimlane = Swimlanes.findOne({
+      const swimlane = ReactiveCache.getSwimlane({
         title: action.swimlaneName,
         boardId,
       });
@@ -320,7 +364,7 @@ RulesHelper = {
         listId = list._id;
       }
       if (swimlane === undefined) {
-        swimlaneId = Swimlanes.findOne({ title: 'Default', boardId })._id;
+        swimlaneId = ReactiveCache.getSwimlane({ title: 'Default', boardId })._id;
       } else {
         swimlaneId = swimlane._id;
       }
@@ -329,8 +373,29 @@ RulesHelper = {
         listId,
         swimlaneId,
         sort: 0,
-        boardId,
+        boardId
       });
+    }
+    if (action.actionType === 'linkCard') {
+      const list = ReactiveCache.getList({ title: action.listName, boardId: action.boardId });
+      const card = ReactiveCache.getCard(activity.cardId);
+      let listId = '';
+      let swimlaneId = '';
+      const swimlane = ReactiveCache.getSwimlane({
+        title: action.swimlaneName,
+        boardId: action.boardId,
+      });
+      if (list === undefined) {
+        listId = '';
+      } else {
+        listId = list._id;
+      }
+      if (swimlane === undefined) {
+        swimlaneId = ReactiveCache.getSwimlane({ title: 'Default', boardId: action.boardId })._id;
+      } else {
+        swimlaneId = swimlane._id;
+      }
+      card.link(action.boardId, swimlaneId, listId);
     }
   },
 };

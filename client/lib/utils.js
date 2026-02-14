@@ -1,43 +1,490 @@
-import { Cookies } from 'meteor/ostrio:cookies';
-const cookies = new Cookies();
+import { ReactiveCache } from '/imports/reactiveCache';
+import { FlowRouter } from 'meteor/ostrio:flow-router-extra';
+import { Tracker } from 'meteor/tracker';
 
 Utils = {
+  async setBackgroundImage(url) {
+    const currentBoard = Utils.getCurrentBoard();
+    if (currentBoard.backgroundImageURL !== undefined) {
+      $(".board-wrapper").css({"background":"url(" + currentBoard.backgroundImageURL + ")","background-size":"cover"});
+      $(".swimlane,.swimlane .list,.swimlane .list .list-body,.swimlane .list:first-child .list-body").css({"background-color":"transparent"});
+      $(".minicard").css({"opacity": "0.9"});
+    } else if (currentBoard["background-color"]) {
+      await currentBoard.setColor(currentBoard["background-color"]);
+    }
+  },
+  /** returns the current board id
+   * <li> returns the current board id or the board id of the popup card if set
+   */
+  getCurrentBoardId() {
+    let popupCardBoardId = Session.get('popupCardBoardId');
+    let currentBoard = Session.get('currentBoard');
+    let ret = currentBoard;
+    if (popupCardBoardId) {
+      ret = popupCardBoardId;
+    }
+    return ret;
+  },
+  getCurrentCardId(ignorePopupCard) {
+    let ret = Session.get('currentCard');
+    if (!ret && !ignorePopupCard) {
+      ret = Utils.getPopupCardId();
+    }
+    return ret;
+  },
+  getPopupCardId() {
+    const ret = Session.get('popupCardId');
+    return ret;
+  },
+  getCurrentListId() {
+    const ret = Session.get('currentList');
+    return ret;
+  },
+  /** returns the current board
+   * <li> returns the current board or the board of the popup card if set
+   */
+  getCurrentBoard() {
+    const boardId = Utils.getCurrentBoardId();
+    const ret = ReactiveCache.getBoard(boardId);
+    return ret;
+  },
+  getCurrentCard(ignorePopupCard) {
+    const cardId = Utils.getCurrentCardId(ignorePopupCard);
+    const ret = ReactiveCache.getCard(cardId);
+    return ret;
+  },
+
+  // Zoom and mobile mode utilities
+  getZoomLevel() {
+    const user = ReactiveCache.getCurrentUser();
+    if (user && user.profile && user.profile.zoomLevel !== undefined) {
+      return user.profile.zoomLevel;
+    }
+    // For non-logged-in users, check localStorage
+    const stored = localStorage.getItem('wekan-zoom-level');
+    return stored ? parseFloat(stored) : 1.0;
+  },
+
+  setZoomLevel(level) {
+    const user = ReactiveCache.getCurrentUser();
+    if (user) {
+      // Update user profile
+      user.setZoomLevel(level);
+    } else {
+      // Store in localStorage for non-logged-in users
+      localStorage.setItem('wekan-zoom-level', level.toString());
+    }
+    Utils.applyZoomLevel(level);
+
+    // Trigger reactive updates for UI components
+    Session.set('wekan-zoom-level', level);
+  },
+
+  getMobileMode() {
+    // Check localStorage first - user's explicit preference takes priority
+    const stored = localStorage.getItem('wekan-mobile-mode');
+    if (stored !== null) {
+      return stored === 'true';
+    }
+
+    // Then check user profile
+    const user = ReactiveCache.getCurrentUser();
+    if (user && user.profile && user.profile.mobileMode !== undefined) {
+      return user.profile.mobileMode;
+    }
+
+    // Default to mobile mode for iPhone/iPod
+    const isIPhone = /iPhone|iPod/i.test(navigator.userAgent);
+    return isIPhone;
+  },
+
+  setMobileMode(enabled) {
+    const user = ReactiveCache.getCurrentUser();
+    if (user) {
+      // Update user profile
+      user.setMobileMode(enabled);
+    }
+    // Always store in localStorage for persistence across sessions
+    localStorage.setItem('wekan-mobile-mode', enabled.toString());
+    Utils.applyMobileMode(enabled);
+    // Trigger reactive updates for UI components
+    Session.set('wekan-mobile-mode', enabled);
+    // Re-apply zoom level to ensure proper rendering
+    const zoomLevel = Utils.getZoomLevel();
+    Utils.applyZoomLevel(zoomLevel);
+  },
+
+  getCardZoom() {
+    const user = ReactiveCache.getCurrentUser();
+    if (user && user.profile && user.profile.cardZoom !== undefined) {
+      return user.profile.cardZoom;
+    }
+    const stored = localStorage.getItem('wekan-card-zoom');
+    return stored ? parseFloat(stored) : 1.0;
+  },
+
+  setCardZoom(level) {
+    const user = ReactiveCache.getCurrentUser();
+    if (user) {
+      user.setCardZoom(level);
+    }
+    localStorage.setItem('wekan-card-zoom', level.toString());
+    Utils.applyCardZoom(level);
+    Session.set('wekan-card-zoom', level);
+  },
+
+  applyCardZoom(level) {
+    const cardDetails = document.querySelector('.card-details');
+    if (cardDetails) {
+      cardDetails.style.fontSize = `${level}em`;
+    }
+  },
+
+  applyZoomLevel(level) {
+    const boardWrapper = document.querySelector('.board-wrapper');
+    const body = document.body;
+    const isMobileMode = body.classList.contains('mobile-mode');
+
+    if (boardWrapper) {
+      if (isMobileMode) {
+        // On mobile mode, only apply zoom to text and icons, not the entire layout
+        // Remove any existing transform from board-wrapper
+        boardWrapper.style.transform = '';
+        boardWrapper.style.transformOrigin = '';
+
+        // Apply zoom to text and icon elements instead
+        const textElements = boardWrapper.querySelectorAll('h1, h2, h3, h4, h5, h6, p, span, div, .minicard, .list-header-name, .board-header-btn, .fa, .icon');
+        textElements.forEach(element => {
+          element.style.transform = `scale(${level})`;
+          element.style.transformOrigin = 'center';
+        });
+
+        // Reset board-canvas height
+        const boardCanvas = document.querySelector('.board-canvas');
+        if (boardCanvas) {
+          boardCanvas.style.height = '';
+        }
+      } else {
+        // Desktop mode: apply zoom to entire board-wrapper as before
+        boardWrapper.style.transform = `scale(${level})`;
+        boardWrapper.style.transformOrigin = 'top left';
+
+        // If zoom is 50% or lower, make board wrapper full width like content
+        if (level <= 0.5) {
+          boardWrapper.style.width = '100%';
+          boardWrapper.style.maxWidth = '100%';
+          boardWrapper.style.margin = '0';
+        } else {
+          // Reset to normal width for higher zoom levels
+          boardWrapper.style.width = '';
+          boardWrapper.style.maxWidth = '';
+          boardWrapper.style.margin = '';
+        }
+
+        // Adjust container height to prevent scroll issues
+        const boardCanvas = document.querySelector('.board-canvas');
+        if (boardCanvas) {
+          boardCanvas.style.height = `${100 / level}%`;
+
+          // For high zoom levels (200%+), enable both horizontal and vertical scrolling
+          if (level >= 2.0) {
+            boardCanvas.style.overflowX = 'auto';
+            boardCanvas.style.overflowY = 'auto';
+            // Ensure the content area can scroll both horizontally and vertically
+            const content = document.querySelector('#content');
+            if (content) {
+              content.style.overflowX = 'auto';
+              content.style.overflowY = 'auto';
+            }
+          } else {
+            // Reset overflow for normal zoom levels
+            boardCanvas.style.overflowX = '';
+            boardCanvas.style.overflowY = '';
+            const content = document.querySelector('#content');
+            if (content) {
+              content.style.overflowX = '';
+              content.style.overflowY = '';
+            }
+          }
+        }
+      }
+    }
+  },
+
+  applyMobileMode(enabled) {
+    const body = document.body;
+    if (enabled) {
+      body.classList.add('mobile-mode');
+      body.classList.remove('desktop-mode');
+    } else {
+      body.classList.add('desktop-mode');
+      body.classList.remove('mobile-mode');
+    }
+  },
+
+  initializeUserSettings() {
+    // Apply saved settings on page load
+    const zoomLevel = Utils.getZoomLevel();
+    const mobileMode = Utils.getMobileMode();
+    Utils.applyZoomLevel(zoomLevel);
+    Utils.applyMobileMode(mobileMode);
+  },
+  getCurrentList() {
+    const listId = this.getCurrentListId();
+    let ret = null;
+    if (listId) {
+      ret = ReactiveCache.getList(listId);
+    }
+    return ret;
+  },
+  getPopupCard() {
+    const cardId = Utils.getPopupCardId();
+    const ret = ReactiveCache.getCard(cardId);
+    return ret;
+  },
+  canModifyCard() {
+    const currentUser = ReactiveCache.getCurrentUser();
+    const ret = (
+      currentUser &&
+      currentUser.isBoardMember() &&
+      !currentUser.isCommentOnly() &&
+      !currentUser.isWorker() &&
+      !currentUser.isReadOnly() &&
+      !currentUser.isReadAssignedOnly()
+    );
+    return ret;
+  },
+  canMoveCard() {
+    const currentUser = ReactiveCache.getCurrentUser();
+    const ret = (
+      currentUser &&
+      currentUser.isBoardMember() &&
+      !currentUser.isCommentOnly() &&
+      !currentUser.isReadOnly() &&
+      !currentUser.isReadAssignedOnly()
+    );
+    return ret;
+  },
+  canModifyBoard() {
+    const currentUser = ReactiveCache.getCurrentUser();
+    const ret = (
+      currentUser &&
+      currentUser.isBoardMember() &&
+      !currentUser.isCommentOnly() &&
+      !currentUser.isReadOnly() &&
+      !currentUser.isReadAssignedOnly()
+    );
+    return ret;
+  },
+  reload() {
+    // we move all window.location.reload calls into this function
+    // so we can disable it when running tests.
+    // This is because we are not allowed to override location.reload but
+    // we can override Utils.reload to prevent reload during tests.
+    window.location.reload();
+  },
   setBoardView(view) {
-    currentUser = Meteor.user();
+    const currentUser = ReactiveCache.getCurrentUser();
+
     if (currentUser) {
-      Meteor.user().setBoardView(view);
-    } else if (view === 'board-view-lists') {
-      cookies.set('boardView', 'board-view-lists'); //true
+      // Update localStorage first
+      window.localStorage.setItem('boardView', view);
+
+      // Update user profile via Meteor method
+      Meteor.call('setBoardView', view, (error) => {
+        if (error) {
+          console.error('[setBoardView] Update failed:', error);
+        } else {
+          // Reload to apply the view change
+          Utils.reload();
+        }
+      });
     } else if (view === 'board-view-swimlanes') {
-      cookies.set('boardView', 'board-view-swimlanes'); //true
+      window.localStorage.setItem('boardView', 'board-view-swimlanes'); //true
+      Utils.reload();
+    } else if (view === 'board-view-lists') {
+      window.localStorage.setItem('boardView', 'board-view-lists'); //true
+      Utils.reload();
     } else if (view === 'board-view-cal') {
-      cookies.set('boardView', 'board-view-cal'); //true
+      window.localStorage.setItem('boardView', 'board-view-cal'); //true
+      Utils.reload();
+    } else if (view === 'board-view-gantt') {
+      window.localStorage.setItem('boardView', 'board-view-gantt'); //true
+      Utils.reload();
+    } else {
+      window.localStorage.setItem('boardView', 'board-view-swimlanes'); //true
+      Utils.reload();
     }
   },
 
   unsetBoardView() {
-    cookies.remove('boardView');
-    cookies.remove('collapseSwimlane');
+    window.localStorage.removeItem('boardView');
+    window.localStorage.removeItem('collapseSwimlane');
   },
 
   boardView() {
-    currentUser = Meteor.user();
+    currentUser = ReactiveCache.getCurrentUser();
     if (currentUser) {
       return (currentUser.profile || {}).boardView;
-    } else if (cookies.get('boardView') === 'board-view-lists') {
-      return 'board-view-lists';
-    } else if (cookies.get('boardView') === 'board-view-swimlanes') {
+    } else if (
+      window.localStorage.getItem('boardView') === 'board-view-swimlanes'
+    ) {
       return 'board-view-swimlanes';
-    } else if (cookies.get('boardView') === 'board-view-cal') {
+    } else if (
+      window.localStorage.getItem('boardView') === 'board-view-lists'
+    ) {
+      return 'board-view-lists';
+    } else if (window.localStorage.getItem('boardView') === 'board-view-cal') {
       return 'board-view-cal';
+    } else if (window.localStorage.getItem('boardView') === 'board-view-gantt') {
+      return 'board-view-gantt';
     } else {
-      return false;
+      window.localStorage.setItem('boardView', 'board-view-swimlanes'); //true
+      Utils.reload();
+      return 'board-view-swimlanes';
     }
+  },
+
+  getListCollapseState(list) {
+    if (!list) return false;
+    const key = `collapsedList-${list._id}`;
+    const sessionVal = Session.get(key);
+    if (typeof sessionVal === 'boolean') {
+      return sessionVal;
+    }
+
+    const user = ReactiveCache.getCurrentUser();
+    let stored = null;
+    if (user && user.getCollapsedListFromStorage) {
+      stored = user.getCollapsedListFromStorage(list.boardId, list._id);
+    } else if (Users.getPublicCollapsedList) {
+      stored = Users.getPublicCollapsedList(list.boardId, list._id);
+    }
+
+    if (typeof stored === 'boolean') {
+      Session.setDefault(key, stored);
+      return stored;
+    }
+
+    const fallback = typeof list.collapsed === 'boolean' ? list.collapsed : false;
+    Session.setDefault(key, fallback);
+    return fallback;
+  },
+
+  setListCollapseState(list, collapsed) {
+    if (!list) return;
+    const key = `collapsedList-${list._id}`;
+    Session.set(key, !!collapsed);
+    const user = ReactiveCache.getCurrentUser();
+    if (user) {
+      Meteor.call('setListCollapsedState', list.boardId, list._id, !!collapsed);
+    } else if (Users.setPublicCollapsedList) {
+      Users.setPublicCollapsedList(list.boardId, list._id, !!collapsed);
+    }
+  },
+
+  getSwimlaneCollapseState(swimlane) {
+    if (!swimlane) return false;
+    const key = `collapsedSwimlane-${swimlane._id}`;
+    const sessionVal = Session.get(key);
+    if (typeof sessionVal === 'boolean') {
+      return sessionVal;
+    }
+
+    const user = ReactiveCache.getCurrentUser();
+    let stored = null;
+    if (user && user.getCollapsedSwimlaneFromStorage) {
+      stored = user.getCollapsedSwimlaneFromStorage(
+        swimlane.boardId,
+        swimlane._id,
+      );
+    } else if (Users.getPublicCollapsedSwimlane) {
+      stored = Users.getPublicCollapsedSwimlane(swimlane.boardId, swimlane._id);
+    }
+
+    if (typeof stored === 'boolean') {
+      Session.setDefault(key, stored);
+      return stored;
+    }
+
+    const fallback = typeof swimlane.collapsed === 'boolean' ? swimlane.collapsed : false;
+    Session.setDefault(key, fallback);
+    return fallback;
+  },
+
+  setSwimlaneCollapseState(swimlane, collapsed) {
+    if (!swimlane) return;
+    const key = `collapsedSwimlane-${swimlane._id}`;
+    Session.set(key, !!collapsed);
+    const user = ReactiveCache.getCurrentUser();
+    if (user) {
+      Meteor.call('setSwimlaneCollapsedState', swimlane.boardId, swimlane._id, !!collapsed);
+    } else if (Users.setPublicCollapsedSwimlane) {
+      Users.setPublicCollapsedSwimlane(swimlane.boardId, swimlane._id, !!collapsed);
+    }
+  },
+
+  myCardsSort() {
+    let sort = window.localStorage.getItem('myCardsSort');
+
+    if (!sort || !['board', 'dueAt'].includes(sort)) {
+      sort = 'board';
+    }
+
+    return sort;
+  },
+
+  myCardsSortToggle() {
+    if (this.myCardsSort() === 'board') {
+      this.setMyCardsSort('dueAt');
+    } else {
+      this.setMyCardsSort('board');
+    }
+  },
+
+  setMyCardsSort(sort) {
+    window.localStorage.setItem('myCardsSort', sort);
+    Utils.reload();
+  },
+
+  archivedBoardIds() {
+    const ret = ReactiveCache.getBoards({ archived: false }).map(board => board._id);
+    return ret;
+  },
+
+  dueCardsView() {
+    let view = window.localStorage.getItem('dueCardsView');
+
+    if (!view || !['me', 'all'].includes(view)) {
+      view = 'me';
+    }
+
+    return view;
+  },
+
+  setDueCardsView(view) {
+    window.localStorage.setItem('dueCardsView', view);
+    Utils.reload();
+  },
+
+  myCardsView() {
+    let view = window.localStorage.getItem('myCardsView');
+
+    if (!view || !['boards', 'table'].includes(view)) {
+      view = 'boards';
+    }
+
+    return view;
+  },
+
+  setMyCardsView(view) {
+    window.localStorage.setItem('myCardsView', view);
+    Utils.reload();
   },
 
   // XXX We should remove these two methods
   goBoardId(_id) {
-    const board = Boards.findOne(_id);
+    const board = ReactiveCache.getBoard(_id);
     return (
       board &&
       FlowRouter.go('board', {
@@ -48,8 +495,8 @@ Utils = {
   },
 
   goCardId(_id) {
-    const card = Cards.findOne(_id);
-    const board = Boards.findOne(card.boardId);
+    const card = ReactiveCache.getCard(_id);
+    const board = ReactiveCache.getBoard(card.boardId);
     return (
       board &&
       FlowRouter.go('card', {
@@ -59,33 +506,21 @@ Utils = {
       })
     );
   },
+  getCommonAttachmentMetaFrom(card) {
+    const meta = {};
+    if (card.isLinkedCard()) {
+      meta.boardId = ReactiveCache.getCard(card.linkedId).boardId;
+      meta.cardId = card.linkedId;
+    } else {
+      meta.boardId = card.boardId;
+      meta.swimlaneId = card.swimlaneId;
+      meta.listId = card.listId;
+      meta.cardId = card._id;
+    }
+    return meta;
+  },
   MAX_IMAGE_PIXEL: Meteor.settings.public.MAX_IMAGE_PIXEL,
   COMPRESS_RATIO: Meteor.settings.public.IMAGE_COMPRESS_RATIO,
-  processUploadedAttachment(card, fileObj, callback) {
-    const next = attachment => {
-      if (typeof callback === 'function') {
-        callback(attachment);
-      }
-    };
-    if (!card) {
-      return next();
-    }
-    const file = new FS.File(fileObj);
-    if (card.isLinkedCard()) {
-      file.boardId = Cards.findOne(card.linkedId).boardId;
-      file.cardId = card.linkedId;
-    } else {
-      file.boardId = card.boardId;
-      file.swimlaneId = card.swimlaneId;
-      file.listId = card.listId;
-      file.cardId = card._id;
-    }
-    file.userId = Meteor.userId();
-    if (file.original) {
-      file.original.name = fileObj.name;
-    }
-    return next(Attachments.insert(file));
-  },
   shrinkImage(options) {
     // shrink image to certain size
     const dataurl = options.dataurl,
@@ -95,14 +530,14 @@ Utils = {
       image = document.createElement('img');
     const maxSize = options.maxSize || 1024;
     const ratio = options.ratio || 1.0;
-    const next = function(result) {
+    const next = function (result) {
       image = null;
       canvas = null;
       if (typeof callback === 'function') {
         callback(result);
       }
     };
-    image.onload = function() {
+    image.onload = function () {
       let width = this.width,
         height = this.height;
       let changed = false;
@@ -131,7 +566,7 @@ Utils = {
         next(changed);
       }
     };
-    image.onerror = function() {
+    image.onerror = function () {
       next(false);
     };
     image.src = dataurl;
@@ -141,44 +576,97 @@ Utils = {
   },
 
   windowResizeDep: new Tracker.Dependency(),
-
   // in fact, what we really care is screen size
   // large mobile device like iPad or android Pad has a big screen, it should also behave like a desktop
   // in a small window (even on desktop), Wekan run in compact mode.
   // we can easily debug with a small window of desktop browser. :-)
   isMiniScreen() {
-    // OLD WINDOW WIDTH DETECTION:
     this.windowResizeDep.depend();
-    return $(window).width() <= 800;
+    // Also depend on mobile mode changes to make this reactive
+    Session.get('wekan-mobile-mode');
 
+    // Show mobile view when:
+    // 1. Screen width is 800px or less (matches CSS media queries)
+    // 2. Mobile phones in portrait mode
+    // 3. iPad in very small screens (≤ 600px)
+    // 4. All iPhone models by default (including largest models), but respect user preference
+    const isSmallScreen = window.innerWidth <= 800;
+    const isVerySmallScreen = window.innerWidth <= 600;
+    const isPortrait = window.innerWidth < window.innerHeight || window.matchMedia("(orientation: portrait)").matches;
+    const isMobilePhone = /Mobile|Android|iPhone|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) && !/iPad/i.test(navigator.userAgent);
+    const isIPhone = /iPhone|iPod/i.test(navigator.userAgent);
+    const isIPad = /iPad/i.test(navigator.userAgent);
+    const isUbuntuTouch = /Ubuntu/i.test(navigator.userAgent);
+
+    // Check if user has explicitly set mobile mode preference
+    const userMobileMode = this.getMobileMode();
+
+    // For iPhone: default to mobile view, but respect user's mobile mode toggle preference
+    // This ensures all iPhone models (including iPhone 15 Pro Max, 14 Pro Max, etc.) start with mobile view
+    // but users can still switch to desktop mode if they prefer
+    if (isIPhone) {
+      // If user has explicitly set a preference, respect it
+      if (userMobileMode !== null && userMobileMode !== undefined) {
+        return userMobileMode;
+      }
+      // Otherwise, default to mobile view for iPhones
+      return true;
+    } else if (isMobilePhone) {
+      return isPortrait; // Other mobile phones: portrait = mobile, landscape = desktop
+    } else if (isIPad) {
+      return isVerySmallScreen; // iPad: only very small screens get mobile view
+    } else if (isUbuntuTouch) {
+      // Ubuntu Touch: smartphones (≤ 600px) behave like mobile phones, tablets (> 600px) like iPad
+      if (isVerySmallScreen) {
+        return isPortrait; // Ubuntu Touch smartphone: portrait = mobile, landscape = desktop
+      } else {
+        return isVerySmallScreen; // Ubuntu Touch tablet: only very small screens get mobile view
+      }
+    } else {
+      return isSmallScreen; // Desktop: based on 800px screen width
+    }
+  },
+
+  isTouchScreen() {
     // NEW TOUCH DEVICE DETECTION:
     // https://developer.mozilla.org/en-US/docs/Web/HTTP/Browser_detection_using_the_user_agent
-
-    /*
     var hasTouchScreen = false;
     if ("maxTouchPoints" in navigator) {
-        hasTouchScreen = navigator.maxTouchPoints > 0;
+      hasTouchScreen = navigator.maxTouchPoints > 0;
     } else if ("msMaxTouchPoints" in navigator) {
-        hasTouchScreen = navigator.msMaxTouchPoints > 0;
+      hasTouchScreen = navigator.msMaxTouchPoints > 0;
     } else {
-        var mQ = window.matchMedia && matchMedia("(pointer:coarse)");
-        if (mQ && mQ.media === "(pointer:coarse)") {
-            hasTouchScreen = !!mQ.matches;
-        } else if ('orientation' in window) {
-            hasTouchScreen = true; // deprecated, but good fallback
-        } else {
-            // Only as a last resort, fall back to user agent sniffing
-            var UA = navigator.userAgent;
-            hasTouchScreen = (
-                /\b(BlackBerry|webOS|iPhone|IEMobile)\b/i.test(UA) ||
-                /\b(Android|Windows Phone|iPad|iPod)\b/i.test(UA)
-            );
-        }
+      var mQ = window.matchMedia && matchMedia("(pointer:coarse)");
+      if (mQ && mQ.media === "(pointer:coarse)") {
+        hasTouchScreen = !!mQ.matches;
+      } else if ('orientation' in window) {
+        hasTouchScreen = true; // deprecated, but good fallback
+      } else {
+        // Only as a last resort, fall back to user agent sniffing
+        var UA = navigator.userAgent;
+        hasTouchScreen = (
+          /\b(BlackBerry|webOS|iPhone|IEMobile)\b/i.test(UA) ||
+          /\b(Android|Windows Phone|iPad|iPod)\b/i.test(UA)
+        );
+      }
     }
-    */
-    //if (hasTouchScreen)
-    //    document.getElementById("exampleButton").style.padding="1em";
-    //return false;
+    return hasTouchScreen;
+  },
+
+  // returns if desktop drag handles are enabled
+  isShowDesktopDragHandles() {
+    const currentUser = Meteor.user();
+    if (currentUser) {
+      return currentUser.hasShowDesktopDragHandles();
+    } else {
+      // For non-logged-in users, check localStorage
+      return window.localStorage.getItem('showDesktopDragHandles') === 'true';
+    }
+  },
+
+  // returns if mini screen or desktop drag handles
+  isTouchScreenOrShowDesktopDragHandles() {
+    return Utils.isTouchScreen() || Utils.isShowDesktopDragHandles();
   },
 
   calculateIndexData(prevData, nextData, nItems = 1) {
@@ -189,20 +677,51 @@ Utils = {
       increment = 1;
       // If we drop the card in the first position
     } else if (!prevData) {
-      base = nextData.sort - 1;
-      increment = -1;
+      const nextSortIndex = nextData.sort;
+      const ceil = Math.ceil(nextSortIndex - 1);
+      if (ceil < nextSortIndex) {
+        increment = nextSortIndex - ceil;
+        base = nextSortIndex - increment;
+      } else {
+        base = nextData.sort - 1;
+        increment = -1;
+      }
       // If we drop the card in the last position
     } else if (!nextData) {
-      base = prevData.sort + 1;
-      increment = 1;
+      const prevSortIndex = prevData.sort;
+      const floor = Math.floor(prevSortIndex + 1);
+      if (floor > prevSortIndex) {
+        increment = prevSortIndex - floor;
+        base = prevSortIndex - increment;
+      } else {
+        base = prevData.sort + 1;
+        increment = 1;
+      }
     }
     // In the general case take the average of the previous and next element
     // sort indexes.
     else {
       const prevSortIndex = prevData.sort;
       const nextSortIndex = nextData.sort;
-      increment = (nextSortIndex - prevSortIndex) / (nItems + 1);
-      base = prevSortIndex + increment;
+      if (nItems == 1 ) {
+        if (prevSortIndex < 0 ) {
+          const ceil = Math.ceil(nextSortIndex - 1);
+          if (ceil < nextSortIndex && ceil > prevSortIndex) {
+            increment = ceil - prevSortIndex;
+          }
+        } else {
+          const floor = Math.floor(nextSortIndex - 1);
+          if (floor < nextSortIndex && floor > prevSortIndex) {
+            increment = floor - prevSortIndex;
+          }
+        }
+      }
+      if (!increment) {
+        increment = (nextSortIndex - prevSortIndex) / (nItems + 1);
+      }
+      if (!base) {
+        base = prevSortIndex + increment;
+      }
     }
     // XXX Return a generator that yield values instead of a base with a
     // increment number.
@@ -214,114 +733,36 @@ Utils = {
 
   // Determine the new sort index
   calculateIndex(prevCardDomElement, nextCardDomElement, nCards = 1) {
-    let base, increment;
-    // If we drop the card to an empty column
-    if (!prevCardDomElement && !nextCardDomElement) {
-      base = 0;
-      increment = 1;
-      // If we drop the card in the first position
-    } else if (!prevCardDomElement) {
-      base = Blaze.getData(nextCardDomElement).sort - 1;
-      increment = -1;
-      // If we drop the card in the last position
-    } else if (!nextCardDomElement) {
-      base = Blaze.getData(prevCardDomElement).sort + 1;
-      increment = 1;
+    let prevData = null;
+    let nextData = null;
+    if (prevCardDomElement) {
+      prevData = Blaze.getData(prevCardDomElement)
     }
-    // In the general case take the average of the previous and next element
-    // sort indexes.
-    else {
-      const prevSortIndex = Blaze.getData(prevCardDomElement).sort;
-      const nextSortIndex = Blaze.getData(nextCardDomElement).sort;
-      increment = (nextSortIndex - prevSortIndex) / (nCards + 1);
-      base = prevSortIndex + increment;
+    if (nextCardDomElement) {
+      nextData = Blaze.getData(nextCardDomElement);
     }
-    // XXX Return a generator that yield values instead of a base with a
-    // increment number.
-    return {
-      base,
-      increment,
-    };
-  },
-
-  // Detect touch device
-  isTouchDevice() {
-    const isTouchable = (() => {
-      const prefixes = ' -webkit- -moz- -o- -ms- '.split(' ');
-      const mq = function(query) {
-        return window.matchMedia(query).matches;
-      };
-
-      if (
-        'ontouchstart' in window ||
-        (window.DocumentTouch && document instanceof window.DocumentTouch)
-      ) {
-        return true;
-      }
-
-      // include the 'heartz' as a way to have a non matching MQ to help terminate the join
-      // https://git.io/vznFH
-      const query = [
-        '(',
-        prefixes.join('touch-enabled),('),
-        'heartz',
-        ')',
-      ].join('');
-      return mq(query);
-    })();
-    Utils.isTouchDevice = () => isTouchable;
-    return isTouchable;
-  },
-
-  calculateTouchDistance(touchA, touchB) {
-    return Math.sqrt(
-      Math.pow(touchA.screenX - touchB.screenX, 2) +
-        Math.pow(touchA.screenY - touchB.screenY, 2),
-    );
-  },
-
-  enableClickOnTouch(selector) {
-    let touchStart = null;
-    let lastTouch = null;
-
-    $(document).on('touchstart', selector, function(e) {
-      touchStart = e.originalEvent.touches[0];
-    });
-    $(document).on('touchmove', selector, function(e) {
-      const touches = e.originalEvent.touches;
-      lastTouch = touches[touches.length - 1];
-    });
-    $(document).on('touchend', selector, function(e) {
-      if (
-        touchStart &&
-        lastTouch &&
-        Utils.calculateTouchDistance(touchStart, lastTouch) <= 20
-      ) {
-        e.preventDefault();
-        const clickEvent = document.createEvent('MouseEvents');
-        clickEvent.initEvent('click', true, true);
-        e.target.dispatchEvent(clickEvent);
-      }
-    });
+    const ret = Utils.calculateIndexData(prevData, nextData, nCards);
+    return ret;
   },
 
   manageCustomUI() {
-    Meteor.call('getCustomUI', (err, data) => {
-      if (err && err.error[0] === 'var-not-exist') {
-        Session.set('customUI', false); // siteId || address server not defined
-      }
-      if (!err) {
-        Utils.setCustomUI(data);
+    // Subscribe to custom UI settings (published from server)
+    Meteor.subscribe('customUI');
+    // Reactive helper will be called when Settings data changes
+    Tracker.autorun(() => {
+      const settings = Settings.findOne({});
+      if (settings) {
+        Utils.setCustomUI(settings);
       }
     });
   },
 
   setCustomUI(data) {
-    const currentBoard = Boards.findOne(Session.get('currentBoard'));
+    const currentBoard = Utils.getCurrentBoard();
     if (currentBoard) {
-      DocHead.setTitle(`${currentBoard.title} - ${data.productName}`);
+      document.title = `${currentBoard.title} - ${data.productName}`;
     } else {
-      DocHead.setTitle(`${data.productName}`);
+      document.title = `${data.productName}`;
     }
   },
 
@@ -329,12 +770,12 @@ Utils = {
     window._paq = window._paq || [];
     window._paq.push(['setDoNotTrack', data.doNotTrack]);
     if (data.withUserName) {
-      window._paq.push(['setUserId', Meteor.user().username]);
+      window._paq.push(['setUserId', ReactiveCache.getCurrentUser().username]);
     }
     window._paq.push(['trackPageView']);
     window._paq.push(['enableLinkTracking']);
 
-    (function() {
+    (function () {
       window._paq.push(['setTrackerUrl', `${data.address}piwik.php`]);
       window._paq.push(['setSiteId', data.siteId]);
 
@@ -355,19 +796,29 @@ Utils = {
   },
 
   manageMatomo() {
-    const matomo = Session.get('matomo');
-    if (matomo === undefined) {
-      Meteor.call('getMatomoConf', (err, data) => {
-        if (err && err.error[0] === 'var-not-exist') {
-          Session.set('matomo', false); // siteId || address server not defined
+    // Subscribe to Matomo configuration (published from server)
+    Meteor.subscribe('matomoConfig');
+    // Reactive helper will be called when Settings data changes
+    Tracker.autorun(() => {
+      const matomo = Session.get('matomo');
+      if (matomo === undefined) {
+        const settings = Settings.findOne({});
+        if (settings && settings.matomoURL && settings.matomoSiteId) {
+          const matomoConfig = {
+            address: settings.matomoURL,
+            siteId: settings.matomoSiteId,
+            doNotTrack: settings.matomoDoNotTrack || false,
+            withUserName: settings.matomoWithUserName || false
+          };
+          Utils.setMatomo(matomoConfig);
+        } else {
+          Session.set('matomo', false);
         }
-        if (!err) {
-          Utils.setMatomo(data);
-        }
-      });
-    } else if (matomo) {
-      window._paq.push(['trackPageView']);
-    }
+      } else if (matomo) {
+        window._paq = window._paq || [];
+        window._paq.push(['trackPageView']);
+      }
+    });
   },
 
   getTriggerActionDesc(event, tempInstance) {
@@ -405,6 +856,62 @@ Utils = {
       }
     }
     return finalString;
+  },
+
+  fallbackCopyTextToClipboard(text) {
+    var textArea = document.createElement("textarea");
+    textArea.value = text;
+
+    // Avoid scrolling to bottom
+    textArea.style.top = "0";
+    textArea.style.left = "0";
+    textArea.style.position = "fixed";
+
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+
+    try {
+      document.execCommand('copy');
+      return Promise.resolve(true);
+    } catch (e) {
+      return Promise.reject(false);
+    } finally {
+      document.body.removeChild(textArea);
+    }
+  },
+
+  /** copy the text to the clipboard
+   * @see https://stackoverflow.com/questions/400212/how-do-i-copy-to-the-clipboard-in-javascript/30810322#30810322
+   * @param string copy this text to the clipboard
+   * @return Promise
+   */
+  copyTextToClipboard(text) {
+    let ret;
+    if (navigator.clipboard) {
+      ret = navigator.clipboard.writeText(text).then(function () {
+      }, function (err) {
+        console.error('Async: Could not copy text: ', err);
+      });
+    } else {
+      ret = Utils.fallbackCopyTextToClipboard(text);
+    }
+    return ret;
+  },
+
+  /** show the "copied!" message
+   * @param promise the promise of Utils.copyTextToClipboard
+   * @param $tooltip jQuery tooltip element
+   */
+  showCopied(promise, $tooltip) {
+    if (promise) {
+      promise.then(() => {
+        $tooltip.show(100);
+        setTimeout(() => $tooltip.hide(100), 1000);
+      }, (err) => {
+        console.error("error: ", err);
+      });
+    }
   },
 };
 

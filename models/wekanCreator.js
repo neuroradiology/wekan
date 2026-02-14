@@ -1,6 +1,30 @@
+import { ReactiveCache } from '/imports/reactiveCache';
+import { CustomFields } from './customFields';
+import {
+  formatDateTime,
+  formatDate,
+  formatTime,
+  getISOWeek,
+  isValidDate,
+  isBefore,
+  isAfter,
+  isSame,
+  add,
+  subtract,
+  startOf,
+  endOf,
+  format,
+  parseDate,
+  now,
+  createDate,
+  fromNow,
+  calendar
+} from '/imports/lib/dateUtils';
+import getSlug from 'limax';
+
 const DateString = Match.Where(function(dateAsString) {
   check(dateAsString, String);
-  return moment(dateAsString, moment.ISO_8601).isValid();
+  return isValidDate(new Date(dateAsString));
 });
 
 export class WekanCreator {
@@ -15,6 +39,7 @@ export class WekanCreator {
       cards: {},
       lists: {},
       swimlanes: {},
+      customFields: {},
     };
     // The object creator Wekan Id, indexed by the object Wekan id
     // (so we only parse actions once!)
@@ -30,6 +55,8 @@ export class WekanCreator {
     this.lists = {};
     // Map of cards Wekan ID => Wekan ID
     this.cards = {};
+    // Map of custom fields Wekan ID => Wekan ID
+    this.customFields = {};
     // Map of comments Wekan ID => Wekan ID
     this.commentIds = {};
     // Map of attachments Wekan ID => Wekan ID
@@ -51,6 +78,33 @@ export class WekanCreator {
 
     // maps a wekanCardId to an array of wekanAttachments
     this.attachments = {};
+
+    // default swimlane id created during import if necessary
+    this._defaultSwimlaneId = null;
+
+    // Normalize possible exported id fields: some exports may use `id` instead of `_id`.
+    // Ensure every item we rely on has an `_id` so mappings work consistently.
+    const normalizeIds = arr => {
+      if (!arr) return;
+      arr.forEach(item => {
+        if (item && item.id && !item._id) {
+          item._id = item.id;
+        }
+      });
+    };
+
+    normalizeIds(data.lists);
+    normalizeIds(data.cards);
+    normalizeIds(data.swimlanes);
+    normalizeIds(data.checklists);
+    normalizeIds(data.checklistItems);
+    normalizeIds(data.triggers);
+    normalizeIds(data.actions);
+    normalizeIds(data.labels);
+    normalizeIds(data.customFields);
+    normalizeIds(data.comments);
+    normalizeIds(data.activities);
+    normalizeIds(data.rules);
   }
 
   /**
@@ -207,7 +261,7 @@ export class WekanCreator {
         importedMember.fullName = user.profile.fullname;
       }
       importedMember.username = user.username;
-      const wekanUser = Users.findOne({ username: importedMember.username });
+      const wekanUser = ReactiveCache.getUser({ username: importedMember.username });
       if (wekanUser) {
         importedMember.wekanId = wekanUser._id;
       }
@@ -244,18 +298,20 @@ export class WekanCreator {
           swimlaneId: false,
         },
       ],
+      presentParentTask: boardToImport.presentParentTask,
       // Standalone Export has modifiedAt missing, adding modifiedAt to fix it
       modifiedAt: this._now(boardToImport.modifiedAt),
       permission: boardToImport.permission,
       slug: getSlug(boardToImport.title) || 'board',
       stars: 0,
-      title: boardToImport.title,
+      title: Boards.uniqueTitle(boardToImport.title),
     };
     // now add other members
     if (boardToImport.members) {
       boardToImport.members.forEach(wekanMember => {
-        // do we already have it in our list?
+        // is it defined and do we already have it in our list?
         if (
+          wekanMember.wekanId &&
           !boardToCreate.members.some(
             member => member.wekanId === wekanMember.wekanId,
           )
@@ -266,17 +322,21 @@ export class WekanCreator {
           });
       });
     }
-    boardToImport.labels.forEach(label => {
-      const labelToCreate = {
-        _id: Random.id(6),
-        color: label.color,
-        name: label.name,
-      };
-      // We need to remember them by Wekan ID, as this is the only ref we have
-      // when importing cards.
-      this.labels[label._id] = labelToCreate._id;
-      boardToCreate.labels.push(labelToCreate);
-    });
+
+    if (boardToImport.labels) {
+      boardToImport.labels.forEach(label => {
+        const labelToCreate = {
+          _id: Random.id(6),
+          color: label.color,
+          name: label.name,
+        };
+        // We need to remember them by Wekan ID, as this is the only ref we have
+        // when importing cards.
+        this.labels[label._id] = labelToCreate._id;
+        boardToCreate.labels.push(labelToCreate);
+      });
+    }
+
     const boardId = Boards.direct.insert(boardToCreate);
     Boards.direct.update(boardId, {
       $set: {
@@ -317,7 +377,7 @@ export class WekanCreator {
         dateLastActivity: this._now(),
         description: card.description,
         listId: this.lists[card.listId],
-        swimlaneId: this.swimlanes[card.swimlaneId],
+        swimlaneId: this.swimlanes[card.swimlaneId] || this._defaultSwimlaneId,
         sort: card.sort,
         title: card.title,
         // we attribute the card to its creator if available
@@ -352,10 +412,40 @@ export class WekanCreator {
           cardToCreate.members = wekanMembers;
         }
       }
+      // add assignees
+      if (card.assignees) {
+        const wekanAssignees = [];
+        // we can't just map, as some members may not have been mapped
+        card.assignees.forEach(sourceMemberId => {
+          if (this.members[sourceMemberId]) {
+            const wekanId = this.members[sourceMemberId];
+            // we may map multiple Wekan members to the same wekan user
+            // in which case we risk adding the same user multiple times
+            if (!wekanAssignees.find(wId => wId === wekanId)) {
+              wekanAssignees.push(wekanId);
+            }
+          }
+          return true;
+        });
+        if (wekanAssignees.length > 0) {
+          cardToCreate.assignees = wekanAssignees;
+        }
+      }
       // set color
       if (card.color) {
         cardToCreate.color = card.color;
       }
+
+      // add custom fields
+      if (card.customFields) {
+        cardToCreate.customFields = card.customFields.map(field => {
+          return {
+            _id: this.customFields[field._id],
+            value: field.value,
+          };
+        });
+      }
+
       // insert card
       const cardId = Cards.direct.insert(cardToCreate);
       // keep track of Wekan id => Wekan id
@@ -405,80 +495,73 @@ export class WekanCreator {
       }
       const attachments = this.attachments[card._id];
       const wekanCoverId = card.coverId;
-      if (attachments) {
+      if (attachments && Meteor.isServer) {
         attachments.forEach(att => {
-          const file = new FS.File();
-          // Simulating file.attachData on the client generates multiple errors
-          // - HEAD returns null, which causes exception down the line
-          // - the template then tries to display the url to the attachment which causes other errors
-          // so we make it server only, and let UI catch up once it is done, forget about latency comp.
           const self = this;
-          if (Meteor.isServer) {
-            if (att.url) {
-              file.attachData(att.url, function(error) {
-                file.boardId = boardId;
-                file.cardId = cardId;
-                file.userId = self._user(att.userId);
-                // The field source will only be used to prevent adding
-                // attachments' related activities automatically
-                file.source = 'import';
-                if (error) {
-                  throw error;
-                } else {
-                  const wekanAtt = Attachments.insert(file, () => {
-                    // we do nothing
-                  });
-                  self.attachmentIds[att._id] = wekanAtt._id;
-                  //
-                  if (wekanCoverId === att._id) {
-                    Cards.direct.update(cardId, {
-                      $set: {
-                        coverId: wekanAtt._id,
-                      },
-                    });
-                  }
-                }
-              });
-            } else if (att.file) {
-              file.attachData(
-                Buffer.from(att.file, 'base64'),
-                {
-                  type: att.type,
-                },
-                error => {
-                  file.name(att.name);
-                  file.boardId = boardId;
-                  file.cardId = cardId;
-                  file.userId = self._user(att.userId);
-                  // The field source will only be used to prevent adding
-                  // attachments' related activities automatically
-                  file.source = 'import';
-                  if (error) {
-                    throw error;
-                  } else {
-                    const wekanAtt = Attachments.insert(file, () => {
-                      // we do nothing
-                    });
-                    this.attachmentIds[att._id] = wekanAtt._id;
-                    //
-                    if (wekanCoverId === att._id) {
-                      Cards.direct.update(cardId, {
-                        $set: {
-                          coverId: wekanAtt._id,
-                        },
-                      });
-                    }
-                  }
-                },
-              );
+          const opts = {
+            type: att.type ? att.type : undefined,
+            userId: self._user(att.userId),
+            meta: {
+              boardId,
+              cardId,
+              source: 'import',
+            },
+          };
+          const cb = (error, fileObj) => {
+            if (error) {
+              throw error;
             }
+            self.attachmentIds[att._id] = fileObj._id;
+            if (wekanCoverId === att._id) {
+              Cards.direct.update(cardId, {
+                $set: { coverId: fileObj._id },
+              });
+            }
+          };
+          if (att.url) {
+            Attachments.load(att.url, opts, cb, true);
+          } else if (att.file) {
+            Attachments.insert(att.file, opts, cb, true);
           }
-          // todo XXX set cover - if need be
         });
       }
       result.push(cardId);
     });
     return result;
+  }
+
+  /**
+   * Create the Wekan custom fields corresponding to the supplied Wekan
+   * custom fields.
+   * @param wekanCustomFields
+   * @param boardId
+   */
+  createCustomFields(wekanCustomFields, boardId) {
+    wekanCustomFields.forEach((field, fieldIndex) => {
+      const fieldToCreate = {
+        boardIds: [boardId],
+        name: field.name,
+        type: field.type,
+        settings: field.settings,
+        showOnCard: field.showOnCard,
+        showLabelOnMiniCard: field.showLabelOnMiniCard,
+        automaticallyOnCard: field.automaticallyOnCard,
+        alwaysOnCard: field.alwaysOnCard,
+        //use date "now" if now created at date is provided (e.g. for very old boards)
+        createdAt: this._now(this.createdAt.customFields[field._id]),
+        modifiedAt: field.modifiedAt,
+      };
+      //insert copy of custom field
+      const fieldId = CustomFields.direct.insert(fieldToCreate);
+      //set modified date to now
+      CustomFields.direct.update(fieldId, {
+        $set: {
+          modifiedAt: this._now(),
+        },
+      });
+      //store mapping of old id to new id
+      this.customFields[field._id] = fieldId;
+    });
   }
 
   // Create labels if they do not exist and load this.labels.
@@ -534,6 +617,25 @@ export class WekanCreator {
   }
 
   createSwimlanes(wekanSwimlanes, boardId) {
+    // If no swimlanes provided, create a default so cards still render
+    if (!wekanSwimlanes || wekanSwimlanes.length === 0) {
+      const swimlaneToCreate = {
+        archived: false,
+        boardId,
+        createdAt: this._now(),
+        title: 'Default',
+        sort: 0,
+      };
+      const created = Swimlanes.direct.insert(swimlaneToCreate);
+      Swimlanes.direct.update(created, {
+        $set: {
+          updatedAt: this._now(),
+        },
+      });
+      this._defaultSwimlaneId = created;
+      return;
+    }
+
     wekanSwimlanes.forEach((swimlane, swimlaneIndex) => {
       const swimlaneToCreate = {
         archived: swimlane.archived,
@@ -557,6 +659,38 @@ export class WekanCreator {
         },
       });
       this.swimlanes[swimlane._id] = swimlaneId;
+      if (!this._defaultSwimlaneId) {
+        this._defaultSwimlaneId = swimlaneId;
+      }
+    });
+  }
+
+  createSubtasks(wekanCards) {
+    wekanCards.forEach(card => {
+      // get new id of card (in created / new board)
+      const cardIdInNewBoard = this.cards[card._id];
+
+      //If there is a mapped parent card, use the mapped card
+      //  this means, the card and parent were in the same source board
+      //If there is no mapped parent card, use the original parent id,
+      //  this should handle cases where source and parent are in different boards
+      //  Note: This can only handle board cloning (within the same wekan instance).
+      //        When importing boards between instances the IDs are definitely
+      //        lost if source and parent are two different boards
+      //        This is not the place to fix it, the entire subtask system needs to be rethought there.
+      const parentIdInNewBoard = this.cards[card.parentId]
+        ? this.cards[card.parentId]
+        : card.parentId;
+
+      //if the parent card exists, proceed
+      if (ReactiveCache.getCard(parentIdInNewBoard)) {
+        //set parent id of the card in the new board to the new id of the parent
+        Cards.direct.update(cardIdInNewBoard, {
+          $set: {
+            parentId: parentIdInNewBoard,
+          },
+        });
+      }
     });
   }
 
@@ -620,18 +754,24 @@ export class WekanCreator {
 
   createChecklistItems(wekanChecklistItems) {
     wekanChecklistItems.forEach((checklistitem, checklistitemIndex) => {
-      // Create the checklistItem
-      const checklistItemTocreate = {
-        title: checklistitem.title,
-        checklistId: this.checklists[checklistitem.checklistId],
-        cardId: this.cards[checklistitem.cardId],
-        sort: checklistitem.sort ? checklistitem.sort : checklistitemIndex,
-        isFinished: checklistitem.isFinished,
-      };
-      const checklistItemId = ChecklistItems.direct.insert(
-        checklistItemTocreate,
-      );
-      this.checklistItems[checklistitem._id] = checklistItemId;
+      //Check if the checklist for this item (still) exists
+      //If a checklist was deleted, but items remain, the import would error out here
+      //Leading to no further checklist items being imported
+      if (this.checklists[checklistitem.checklistId]) {
+        // Create the checklistItem
+        const checklistItemTocreate = {
+          title: checklistitem.title,
+          checklistId: this.checklists[checklistitem.checklistId],
+          cardId: this.cards[checklistitem.cardId],
+          sort: checklistitem.sort ? checklistitem.sort : checklistitemIndex,
+          isFinished: checklistitem.isFinished,
+        };
+
+        const checklistItemId = ChecklistItems.direct.insert(
+          checklistItemTocreate,
+        );
+        this.checklistItems[checklistitem._id] = checklistItemId;
+      }
     });
   }
 
@@ -688,6 +828,11 @@ export class WekanCreator {
         case 'createSwimlane': {
           const swimlaneId = activity.swimlaneId;
           this.createdAt.swimlanes[swimlaneId] = activity.createdAt;
+          break;
+        }
+        case 'createCustomField': {
+          const customFieldId = activity.customFieldId;
+          this.createdAt.customFields[customFieldId] = activity.createdAt;
           break;
         }
       }
@@ -826,21 +971,23 @@ export class WekanCreator {
     // }
   }
 
-  create(board, currentBoardId) {
+  async create(board, currentBoardId) {
     // TODO : Make isSandstorm variable global
     const isSandstorm =
       Meteor.settings &&
       Meteor.settings.public &&
       Meteor.settings.public.sandstorm;
     if (isSandstorm && currentBoardId) {
-      const currentBoard = Boards.findOne(currentBoardId);
-      currentBoard.archive();
+      const currentBoard = ReactiveCache.getBoard(currentBoardId);
+      await currentBoard.archive();
     }
     this.parseActivities(board);
     const boardId = this.createBoardAndLabels(board);
     this.createLists(board.lists, boardId);
     this.createSwimlanes(board.swimlanes, boardId);
+    this.createCustomFields(board.customFields, boardId);
     this.createCards(board.cards, boardId);
+    this.createSubtasks(board.cards);
     this.createChecklists(board.checklists);
     this.createChecklistItems(board.checklistItems);
     this.importActivities(board.activities, boardId);
